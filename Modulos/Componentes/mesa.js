@@ -209,7 +209,7 @@ function registerComponent(Kernel) {
     fit(id) { const c = M.cells.get(id); if (c) { M.cells.focus(id, { noFrameFocus: true }); fitRect(disp(c)); } },
     overview,
   };
-
+// lol
   let unreg;
   return {
     id: 'ui.lens.mesa', name: 'Lente · Mesa',

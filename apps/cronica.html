@@ -1,0 +1,77 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Crónica</title>
+<script type="application/json" id="wos-manifest">
+{ "id": "chronicle", "name": "Crónica", "version": "0.2.0",
+  "icon": "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><circle cx='12' cy='12' r='9'/><path d='M12 7v5l3 2'/></svg>",
+  "category": "sistema", "description": "Todo lo que ha pasado en el sistema, y cómo volver atrás",
+  "keywords": ["historial", "versiones", "deshacer", "historia", "tiempo"], "permissions": ["fs.read", "fs.write"],
+  "singleton": true, "winWidth": 700, "winHeight": 460 }
+</script>
+<style>
+  body{display:flex}
+  .col{display:flex;flex-direction:column;min-height:0}
+  #left{width:46%;border-right:var(--bw) solid var(--line)} #right{flex:1}
+  .tabs{display:flex;border-bottom:var(--bw) solid var(--line)}
+  .tabs button{flex:1;border:0;padding:9px;font:11px var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--ink2)}
+  .tabs button.on{background:var(--ink);color:var(--cell-bg)}
+  .scroll{flex:1;overflow:auto}
+  .e{display:flex;gap:10px;padding:7px 12px;border-bottom:var(--bw) solid var(--line);cursor:default;align-items:baseline}
+  .e:hover{background:var(--panel)} .e.sel{background:var(--ink);color:var(--cell-bg)}
+  .e small{margin-left:auto;white-space:nowrap;font:11px var(--mono);opacity:.6} .e .t{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .k{font:10px var(--mono);letter-spacing:.06em;text-transform:uppercase;min-width:6ch;opacity:.55}
+  .rev{padding:10px 12px;border-bottom:var(--bw) solid var(--line)}
+  .rev pre{margin:8px 0 0;padding:8px;border:var(--bw) solid var(--line);max-height:110px;overflow:auto;white-space:pre-wrap;font:12px var(--mono)}
+  .head{padding:10px 12px;border-bottom:var(--bw) solid var(--line)} .head b{font:11px var(--mono);letter-spacing:.1em;text-transform:uppercase}
+  .empty{padding:26px;font:12px var(--mono)}
+</style></head>
+<body>
+  <div id="left" class="col">
+    <div class="tabs"><button id="tl" class="on">Línea de tiempo</button><button id="tf">Con versiones</button></div>
+    <div id="lst" class="scroll"></div>
+  </div>
+  <div id="right" class="col">
+    <div class="head"><b>Versiones</b><div class="muted" id="rp" style="font:12px var(--mono)">elige un archivo con historial</div></div>
+    <div id="revs" class="scroll"></div>
+  </div>
+<script>
+  const $ = id => document.getElementById(id);
+  let mode = 'tl', cur = null;
+  const hh = t => new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+  async function renderList() {
+    $('tl').classList.toggle('on', mode === 'tl'); $('tf').classList.toggle('on', mode === 'tf');
+    if (mode === 'tl') {
+      const log = await Mirage.chronicle.log(250);
+      $('lst').innerHTML = log.length ? log.map(e => `<div class="e${e.path === cur ? ' sel' : ''}" data-p="${esc(e.path || '')}"><span class="k">${e.kind}</span><span class="t">${esc(e.text)}${e.n > 1 ? ' ×' + e.n : ''}</span><small>${hh(e.t)}</small></div>`).join('')
+        : '<div class="empty muted">aún no ha pasado nada</div>';
+    } else {
+      const ps = await Mirage.chronicle.paths();
+      $('lst').innerHTML = ps.length ? ps.map(p => `<div class="e${p.path === cur ? ' sel' : ''}" data-p="${esc(p.path)}"><span class="t">${esc(p.path)}</span><small>${p.count} v · ${hh(p.last)}</small></div>`).join('')
+        : '<div class="empty muted">ningún archivo de texto tiene versiones todavía</div>';
+    }
+  }
+  async function showRevs(path) {
+    cur = path;
+    $('rp').textContent = path;
+    const revs = await Mirage.chronicle.revisions(path);
+    $('revs').innerHTML = revs.length ? revs.map((r, i) =>
+      `<div class="rev"><div class="row"><b>${i === 0 ? 'más reciente' : hh(r.t)}</b><span class="muted">${r.size} car.</span><span class="grow"></span>${i === 0 ? '' : `<button data-t="${r.t}" class="primary">Restaurar</button>`}</div><pre>${esc(r.content.slice(0, 600))}</pre></div>`).join('')
+      : '<div class="empty muted">sin versiones guardadas para este archivo</div>';
+    renderList();
+  }
+  $('tl').onclick = () => { mode = 'tl'; renderList(); };
+  $('tf').onclick = () => { mode = 'tf'; renderList(); };
+  $('lst').addEventListener('click', e => { const r = e.target.closest('.e'); if (r && r.dataset.p) showRevs(r.dataset.p); });
+  $('revs').addEventListener('click', async e => {
+    const b = e.target.closest('[data-t]'); if (!b || !cur) return;
+    try { await Mirage.chronicle.restore(cur, +b.dataset.t); showRevs(cur); } catch (err) { alert(err.message); }
+  });
+
+  Mirage.ready.then(info => {
+    renderList();
+    if (info.args.path) { mode = 'tf'; showRevs(info.args.path); }
+    Mirage.on('chronicle:entry', () => { renderList(); if (cur) showRevs(cur); });
+  });
+  Mirage.on('args', a => { if (a && a.path) showRevs(a.path); });
+</script></body></html>

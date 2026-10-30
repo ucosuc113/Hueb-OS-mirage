@@ -1,0 +1,61 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Ajustes</title>
+<script type="application/json" id="wos-manifest">
+{ "id": "config", "name": "Ajustes", "version": "0.2.0",
+  "icon": "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M4 7h9M19 7h1M4 17h1M11 17h9'/><circle cx='16' cy='7' r='2.5'/><circle cx='8' cy='17' r='2.5'/></svg>",
+  "category": "sistema", "description": "Luz, lente, perfil y pactos con las celdas",
+  "keywords": ["configuración", "tema", "luz", "permisos", "usuario"], "permissions": ["system.config"],
+  "singleton": true, "winWidth": 520, "winHeight": 520 }
+</script>
+<style>
+  body{overflow:auto;padding:18px 20px 28px}
+  section{margin-bottom:26px} section>.label{margin-bottom:10px}
+  .opts{display:flex;flex-wrap:wrap;gap:0}
+  .opts button{margin:0 calc(var(--bw) * -1) calc(var(--bw) * -1) 0}
+  .kv{display:grid;grid-template-columns:auto 1fr;gap:4px 18px;font:12px var(--mono)} .kv span:nth-child(odd){color:var(--ink2)}
+  .pact{display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:var(--bw) solid var(--line);flex-wrap:wrap}
+  .pact .tag{cursor:pointer} .pact .tag:hover{background:var(--ink);color:var(--cell-bg);border-color:var(--ink)}
+</style></head>
+<body>
+  <section><div class="label">Luz</div><div id="moods" class="opts"></div>
+    <p class="muted" id="moodnote" style="font:11px var(--mono);margin:10px 0 0"></p></section>
+  <section><div class="label">Lente · cómo se disponen las celdas</div><div id="lenses" class="opts"></div></section>
+  <section><div class="label">Perfil</div>
+    <div class="row"><input id="nm" class="grow"><button id="sv" class="primary">Guardar</button></div></section>
+  <section><div class="label">Pactos con celdas de terceros</div><div id="pacts"></div></section>
+  <section><div class="label">Sistema</div><div class="kv" id="info"></div></section>
+<script>
+  const $ = id => document.getElementById(id);
+  const DESC = { 'fs.read': 'leer archivos', 'fs.write': 'escribir archivos', 'fs.delete': 'borrar archivos', 'notifications.send': 'avisos', 'proc.kill': 'cerrar procesos', 'system.config': 'configuración', 'app.install': 'instalar' };
+  const NONE = '<span class="muted" style="font:12px var(--mono)">ninguna celda de terceros ha pedido nada</span>';
+  const fmtUp = s => s < 60 ? s + ' s' : s < 3600 ? Math.floor(s / 60) + ' min' : Math.floor(s / 3600) + ' h ' + Math.floor(s % 3600 / 60) + ' min';
+
+  async function render() {
+    const a = await Mirage.sys.appearance();
+    $('moods').innerHTML = a.moods.map(m => `<button class="${a.mood.choice === m.id ? 'on' : ''}" data-mood="${m.id}">${m.name}</button>`).join('');
+    $('moodnote').textContent = a.mood.choice === 'auto' ? `auto: ahora toca «${a.mood.applied}» (día 7–19 h)` : '';
+    $('lenses').innerHTML = a.lenses.map(l => `<button class="${a.lens === l.id ? 'on' : ''}" data-lens="${l.id}">${l.name}</button>`).join('');
+
+    const u = await Mirage.sys.profile();
+    if (u && document.activeElement !== $('nm')) $('nm').value = u.name;
+
+    const g = (await Mirage.sys.grants()).filter(x => x.granted.length || x.requested.length);
+    $('pacts').innerHTML = g.length ? g.map(x => `<div class="pact"><b>${x.name}</b>${x.granted.map(p => `<span class="tag" data-app="${x.appId}" data-perm="${p}" title="Revocar">${DESC[p] || p} ×</span>`).join('')}${x.requested.map(p => `<span class="tag" style="opacity:.5">pidió: ${DESC[p] || p}</span>`).join('')}</div>`).join('') : NONE;
+
+    const i = await Mirage.sys.info();
+    $('info').innerHTML = [['kernel', i.kernel], ['compilación', i.build], ['mirage', i.mirage], ['sesión', '#' + i.session.count], ['encendido', fmtUp(i.uptime)], ['celdas / catálogo', `${i.cells} / ${i.apps}`], ['modo seguro', i.safeMode ? 'sí' : 'no']]
+      .map(([k, v]) => `<span>${k}</span><span>${v}</span>`).join('');
+  }
+  document.addEventListener('click', async e => {
+    const t = e.target.closest('[data-mood],[data-lens],[data-perm]'); if (!t) return;
+    try {
+      if (t.dataset.mood) await Mirage.sys.setMood(t.dataset.mood);
+      else if (t.dataset.lens) await Mirage.sys.setLens(t.dataset.lens);
+      else await Mirage.sys.revoke(t.dataset.app, t.dataset.perm);
+    } catch (err) { alert(err.message); }
+    render();
+  });
+  $('sv').onclick = async () => { await Mirage.sys.updateProfile({ name: $('nm').value }); render(); };
+
+  Mirage.ready.then(() => { render(); setInterval(render, 5000); Mirage.on('k:permissions:granted', render); Mirage.on('k:permissions:revoked', render); });
+</script></body></html>

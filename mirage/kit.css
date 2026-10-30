@@ -1,0 +1,22 @@
+/* Mirage Kit — base visual de cada celda. Plano, B/N, bordes de 2 px del monitor (--bw). */
+*{box-sizing:border-box;border-radius:0}
+html,body{margin:0;height:100%;background:var(--cell-bg);color:var(--ink);font:14px/1.5 var(--font)}
+button,input,select,textarea{font:inherit;color:inherit}
+button{background:transparent;border:var(--bw) solid var(--edge);padding:4px 12px;cursor:pointer;white-space:nowrap}
+button:hover:not(:disabled){border-color:var(--ink)}
+button:disabled{opacity:.35;cursor:default}
+button.primary,button.on{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+button.danger:hover:not(:disabled){background:var(--ink);color:var(--bg)}
+input,select,textarea{background:transparent;border:var(--bw) solid var(--line);padding:5px 9px;outline:0}
+input:focus,select:focus,textarea:focus{border-color:var(--ink)}
+::placeholder{color:var(--ink2)}
+::-webkit-scrollbar{width:8px;height:8px}
+::-webkit-scrollbar-thumb{background:var(--edge)}
+::-webkit-scrollbar-track{background:transparent}
+.muted{color:var(--ink2)}
+.row{display:flex;gap:8px;align-items:center}
+.grow{flex:1;min-width:0}
+.bar{display:flex;gap:8px;align-items:center;padding:8px 10px;border-bottom:var(--bw) solid var(--line)}
+.label{font:11px/1.2 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--ink2)}
+.tag{display:inline-block;padding:0 6px;border:var(--bw) solid var(--line);font:11px/1.5 var(--mono);color:var(--ink2);letter-spacing:.04em}
+h1,h2,h3{margin:0;font-weight:600}

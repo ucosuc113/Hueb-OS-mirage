@@ -19,7 +19,7 @@ function registerComponent(Kernel) {
 
   let root, world, plane, svg, hint, es;
   let view = { x: 0, y: 0, k: 1 };
-  let drag = null, offs = [], animTimer = null, settleT = null, settling = false;
+  let drag = null, offs = [], animTimer = null, settleT = null, settling = false, swallow = false;
   const saveView = M.util.debounce(() => Kernel.prefs.set('mirage.mesa.view', view).catch(() => { }), 800);
 
   function applyView() {
@@ -41,7 +41,8 @@ function registerComponent(Kernel) {
     world.style.setProperty('--gy', (view.y % g) + 'px');
     root.style.setProperty('--k', view.k);
     root.classList.toggle('far', view.k < 0.45);
-    M.cells.each(placeEl); threads();     // each cell jumps to its nearest copy
+    M.cells.each(placeEl); threads();
+    M.bus.emit('mesa:view');
     saveView();
   }
 
@@ -124,7 +125,10 @@ function registerComponent(Kernel) {
       const c = M.cells.get(el.dataset.cell);
       M.cells.focus(c.id, { noFrameFocus: true });
       if (e.target.closest('.cell-grip')) drag = { t: 'size', c, sx: e.clientX, sy: e.clientY, w: c.rect.w, h: c.rect.h };
-      else if (e.target.closest('.cell-bar')) drag = { t: 'move', c, sx: e.clientX, sy: e.clientY, x: c.rect.x, y: c.rect.y };
+      else if (e.target.closest('.cell-bar') || (root.classList.contains('far') && e.target.closest('.cell-bubble'))) {
+        const far = !e.target.closest('.cell-bar');
+        drag = { t: 'move', c, sx: e.clientX, sy: e.clientY, x: c.rect.x, y: c.rect.y, far, moved: !far };
+      }
       else return;
     } else {
       if (!e.target.closest('#world')) return;
@@ -138,15 +142,19 @@ function registerComponent(Kernel) {
     if (!drag) return;
     const dx = e.clientX - drag.sx, dy = e.clientY - drag.sy;
     if (drag.t === 'pan') { view.x = drag.x + dx; view.y = drag.y + dy; applyView(); }
-    else if (drag.t === 'move') { drag.c.rect.x = drag.x + dx / view.k; drag.c.rect.y = drag.y + dy / view.k; place(drag.c); }
+    else if (drag.t === 'move') {
+      if (!drag.moved && Math.hypot(dx, dy) > 4) drag.moved = true;
+      if (drag.moved) { drag.c.rect.x = drag.x + dx / view.k; drag.c.rect.y = drag.y + dy / view.k; place(drag.c); }
+    }
     else { drag.c.rect.w = Math.max(260, drag.w + dx / view.k); drag.c.rect.h = Math.max(160, drag.h + dy / view.k); place(drag.c); }
   }
   function onUp() {
     if (!drag) return;
-    if (drag.t === 'move') {                       // the saved position goes back to [0, WRAP); the view does not change
+    if (drag.t === 'move') {
       drag.c.rect.x = mod(drag.c.rect.x, WRAP_W); drag.c.rect.y = mod(drag.c.rect.y, WRAP_H);
       place(drag.c);
     }
+    if (drag.t === 'move' && drag.far && drag.moved) { swallow = true; setTimeout(() => { swallow = false; }, 60); }
     if (drag.t !== 'pan') M.cells.touch(drag.c.id);
     drag = null; root.classList.remove('dragging'); world.classList.remove('panning');
   }
@@ -192,6 +200,7 @@ function registerComponent(Kernel) {
       es.on(world, 'pointerdown', onDown);
       es.on(window, 'pointermove', onMove);
       es.on(window, 'pointerup', onUp);
+      es.on(window, 'click', e => { if (swallow) { swallow = false; e.stopPropagation(); e.preventDefault(); } }, true);
       es.on(world, 'wheel', onWheel, { passive: false });
       es.on(world, 'dblclick', onDbl);
       es.on(window, 'keydown', onKey);
@@ -223,6 +232,12 @@ function registerComponent(Kernel) {
     },
     fit(id) { const c = M.cells.get(id); if (c) { M.cells.focus(id, { noFrameFocus: true }); fitRect(disp(c)); } },
     overview,
+    wrap: { w: WRAP_W, h: WRAP_H },
+    zoom: () => view.k,
+    near: r => wrapOff({ rect: r }),
+    center: () => ({ x: (innerWidth / 2 - view.x) / view.k, y: (centerY() - view.y) / view.k }),
+    toWorld: (cx, cy) => ({ x: (cx - view.x) / view.k, y: (cy - view.y) / view.k }),
+    menu: () => [{ label: 'View all', hint: 'Esc', run: overview }],
   };
 // lol
   let unreg;

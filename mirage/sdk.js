@@ -60,6 +60,37 @@
     if (e.altKey && e.code === 'KeyM') { e.preventDefault(); post({ t: 'key', key: 'menu' }); }
   });
 
+  var EDITABLE = 'textarea,input:not([type=button]):not([type=submit]):not([type=checkbox]):not([type=radio]):not([type=range]):not([type=color]):not([type=file]),[contenteditable=""],[contenteditable="true"]';
+  var menuFn = null, menuRuns = {}, menuSeq = 0;
+  function packMenu(list, depth) {
+    var out = [];
+    (Array.isArray(list) ? list : []).slice(0, 40).forEach(function (it) {
+      if (!it || typeof it !== 'object') return;
+      if (it.sep) { out.push({ sep: true }); return; }
+      var o = { label: it.label, icon: it.icon, hint: it.hint, disabled: it.disabled, danger: it.danger, checked: it.checked };
+      var sub = typeof it.items === 'function' ? it.items() : it.items;
+      if (sub && depth < 3) o.items = packMenu(sub, depth + 1);
+      else if (typeof it.run === 'function') { o.id = 'm' + (++menuSeq); menuRuns[o.id] = it.run; }
+      out.push(o);
+    });
+    return out;
+  }
+  core.contextMenu = function (fn) { menuFn = typeof fn === 'function' ? fn : null; };
+  handlers['menu:pick'] = [function (d) {                       // the shell tells us which entry was picked
+    var f = d && menuRuns[d.id];
+    if (f) { try { f(); } catch (err) { console.error(err); } }
+  }];
+  window.addEventListener('contextmenu', function (e) {
+    if (e.target && e.target.closest && e.target.closest(EDITABLE)) return;
+    e.preventDefault();
+    var res = null;
+    menuRuns = {};
+    try { res = menuFn ? menuFn(e) : null; } catch (err) { console.error(err); }
+    var bare = !!(res && !Array.isArray(res) && res.bare);
+    var list = res && !Array.isArray(res) ? res.items : res;
+    call('menu.open', e.clientX, e.clientY, packMenu(list, 0), { bare: bare }).catch(function () { });
+  }, true);
+
   function hi() { post({ t: 'ready' }); }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', hi); else hi();
 })();

@@ -51,8 +51,7 @@ button{font:inherit}
 .cell-grip{position:absolute;right:0;bottom:0;width:14px;height:14px;cursor:nwse-resize;touch-action:none;
   border-right:calc(var(--bw) / var(--k,1)) solid var(--ink2);border-bottom:calc(var(--bw) / var(--k,1)) solid var(--ink2)}
 .cell-bubble{display:none;position:absolute;inset:0;flex-direction:column;align-items:center;justify-content:center;gap:10px;
-  background:var(--cell-bg);cursor:pointer;text-align:center;padding:12px;color:var(--ink)}
-/* --k = current Table scale: the bubble keeps a constant visual size when zooming out */
+  background:var(--cell-bg);cursor:grab;text-align:center;padding:12px;color:var(--ink)}
 .cell-bubble .b-ico{font-size:min(calc(48px / var(--k,1)),40cqmin);line-height:1}
 .cell-bubble .b-title{font:600 min(calc(12px / var(--k,1)),12cqmin)/1.2 var(--mono);letter-spacing:.1em;text-transform:uppercase}
 .dragging iframe{pointer-events:none}

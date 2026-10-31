@@ -33,6 +33,7 @@
   <div class="bar foot">
     <button id="open" disabled>Open</button><button id="ren" disabled>Rename</button>
     <button id="inst" disabled title="Register this .html as a cell">Install cell</button>
+    <button id="pin" disabled title="Put it on the Table as a scrap">Pin</button>
     <button id="del" class="danger" disabled>Delete</button><span id="msg" class="muted grow" style="text-align:right;font:11px var(--mono)"></span>
   </div>
   <form id="ask"><input id="askin" autocomplete="off"><button class="primary">OK</button><button type="button" id="askx">Cancel</button></form>
@@ -58,7 +59,7 @@
       `<div class="it${sel === it.id ? ' sel' : ''}" data-id="${it.id}"><span class="k">${kind(it)}</span><span class="n">${it.name}${it.type === 'dir' ? '/' : ''}</span><small>${it.type === 'dir' ? '' : fmt(it.size)}</small></div>`).join('')
       : '<div id="empty" class="muted">empty folder</div>';
     const cur = items.find(i => i.id === sel);
-    $('open').disabled = $('ren').disabled = $('del').disabled = !cur;
+    $('open').disabled = $('ren').disabled = $('del').disabled = $('pin').disabled = !cur;
     $('inst').disabled = !(cur && /\.html?$/i.test(cur.name));
     $('up').disabled = cwd === '/device';
   }
@@ -91,6 +92,7 @@
     if (n === 'delete') await Mirage.fs.remove(it.id, true);
   });
   $('inst').onclick = guard(async () => { const r = await Mirage.cell.install(sel); msg(`cell installed: ${r.name}`); });
+  $('pin').onclick = guard(async () => { await Mirage.scraps.pin(sel); msg('pinned to the table'); });
   $('up2').onclick = () => $('file').click();
   $('file').onchange = guard(async () => {
     for (const f of $('file').files) {
@@ -107,4 +109,22 @@
     for (const t of ['k:fs:write', 'k:fs:remove', 'k:fs:mkdir', 'k:fs:move']) Mirage.on(t, refresh);
   });
   Mirage.on('args', a => { if (a && a.startPath) go(a.startPath); });
+  Mirage.contextMenu(ev => {
+    const row = ev.target.closest('.it'), it = row && items.find(i => i.id === row.dataset.id);
+    if (!it) return [
+      { label: 'New folder', run: () => $('nf').onclick() },
+      { label: 'New file', run: () => $('nt').onclick() },
+      ...(cwd !== '/device' ? [{ sep: true }, { label: 'Up one level', run: () => go(upOf(cwd)) }] : []),
+    ];
+    sel = it.id; render();
+    return [
+      { label: it.type === 'dir' ? 'Open folder' : 'Open', hint: 'dbl click', run: () => open(it) },
+      { label: 'Rename', run: () => $('ren').onclick() },
+      { sep: true },
+      { label: 'Pin to the table', run: guard(async () => { await Mirage.scraps.pin(it.id); msg('pinned to the table'); }) },
+      ...(/\.html?$/i.test(it.name) ? [{ label: 'Install as cell', run: () => $('inst').onclick() }] : []),
+      { sep: true },
+      { label: 'Delete', danger: true, items: [{ label: 'Yes, delete it', danger: true, run: guard(async () => { await Mirage.fs.remove(it.id, true); }) }] },
+    ];
+  });
 </script></body></html>

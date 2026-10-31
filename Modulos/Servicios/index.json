@@ -1,1 +1,1 @@
-{ "services": ["mood.js", "chronicle.js", "intents-core.js"] }
+{ "services": ["mood.js", "chronicle.js", "intents-core.js", "menu.js"] }

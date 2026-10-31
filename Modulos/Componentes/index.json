@@ -1,1 +1,1 @@
-{ "components": ["mesa.js", "mosaico.js", "wish.js", "pulso.js", "bolsillo.js", "pacto.js", "candado.js", "pliego.js", "movimiento.js"] }
+{ "components": ["mesa.js", "mosaico.js", "quire.js", "retazos.js", "papeleta.js", "wish.js", "pulso.js", "bolsillo.js", "pacto.js", "candado.js", "pliego.js", "movimiento.js"] }

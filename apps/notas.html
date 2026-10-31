@@ -1,10 +1,10 @@
 <!doctype html>
-<html><head><meta charset="utf-8"><title>Notas</title>
+<html><head><meta charset="utf-8"><title>Notes</title>
 <script type="application/json" id="wos-manifest">
-{ "id": "text-editor", "name": "Notas", "version": "0.2.0",
+{ "id": "text-editor", "name": "Notes", "version": "0.2.0",
   "icon": "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M5 3h10l4 4v14H5z'/><path d='M8 12h8M8 16h8'/></svg>",
-  "category": "escritura", "description": "Escribe texto; se guarda solo y recuerda sus versiones",
-  "keywords": ["editor", "texto", "bloc", "escribir"], "permissions": ["fs.read", "fs.write"],
+  "category": "writing", "description": "Write text; it saves itself and remembers its versions",
+  "keywords": ["editor", "text", "notepad", "write", "notes"], "permissions": ["fs.read", "fs.write"],
   "winWidth": 560, "winHeight": 420 }
 </script>
 <style>
@@ -15,12 +15,12 @@
 </style></head>
 <body>
   <div class="bar">
-    <input id="path" placeholder="ruta (se crea en /device/docs al guardar)">
+    <input id="path" placeholder="path (created in /device/docs when saving)">
     <span id="st" class="muted"></span>
-    <button id="hist" title="Ver versiones en la Crónica">Versiones</button>
-    <button id="save" class="primary">Guardar</button>
+    <button id="hist" title="See versions in the Chronicle">Versions</button>
+    <button id="save" class="primary">Save</button>
   </div>
-  <textarea id="ed" spellcheck="false" placeholder="escribe…"></textarea>
+  <textarea id="ed" spellcheck="false" placeholder="write…"></textarea>
 <script>
   const $ = id => document.getElementById(id);
   let timer, dirty = false;
@@ -29,17 +29,17 @@
 
   async function load(p) {
     $('path').value = p;
-    try { $('ed').value = await Mirage.fs.read(p); status('abierto'); } catch (e) { $('ed').value = ''; status('nuevo'); }
+    try { $('ed').value = await Mirage.fs.read(p); status('opened'); } catch (e) { $('ed').value = ''; status('new'); }
     dirty = false; Mirage.cell.setTitle(base(p));
   }
   async function save() {
     clearTimeout(timer);
     let p = $('path').value.trim();
-    if (!p) { p = '/device/docs/nota-' + Date.now().toString(36) + '.txt'; $('path').value = p; }
-    try { await Mirage.fs.write(p, $('ed').value); dirty = false; status('guardado'); Mirage.cell.setTitle(base(p)); }
+    if (!p) { p = '/device/docs/note-' + Date.now().toString(36) + '.txt'; $('path').value = p; }
+    try { await Mirage.fs.write(p, $('ed').value); dirty = false; status('saved'); Mirage.cell.setTitle(base(p)); }
     catch (e) { status('error'); alert(e.message); }
   }
-  $('ed').addEventListener('input', () => { dirty = true; status('editando'); clearTimeout(timer); timer = setTimeout(() => { if ($('path').value.trim()) save(); }, 1500); });
+  $('ed').addEventListener('input', () => { dirty = true; status('editing'); clearTimeout(timer); timer = setTimeout(() => { if ($('path').value.trim()) save(); }, 1500); });
   $('save').onclick = save;
   $('hist').onclick = () => Mirage.cell.open('chronicle', { args: { path: $('path').value.trim() } });
   addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); save(); } });

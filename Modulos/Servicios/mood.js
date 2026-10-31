@@ -1,9 +1,9 @@
-/* Servicio · ÁNIMO — la luz del sistema, en escala de grises. Colores sólidos; la jerarquía
-   se logra con opacidad. En "auto" sigue la hora: día entre 7 y 19 h, noche el resto. */
+/* Service · MOOD — the light of the system, in grayscale. Solid colors; hierarchy is made
+   with opacity. In "auto" it follows the clock: day between 7 and 19 h, night the rest. */
 function registerService(Kernel) {
   const M = window.Mirage.init();
 
-  /* Se derivan de dos colores (fondo / tinta) para que todos los tonos sean coherentes */
+  /* Derived from two colors (background / ink) so every tone stays coherent */
   const rgba = (rgb, a) => `rgba(${rgb},${a})`;
   function palette(name, bg, cell, solid, inkRgb, dark) {
     const ink = `rgb(${inkRgb})`;
@@ -15,17 +15,18 @@ function registerService(Kernel) {
     } };
   }
   const MOODS = {
-    noche:   palette('Noche',   '#000000', '#0b0b0b', '#111111', '255,255,255', true),
-    dia:     palette('Día',     '#ffffff', '#fafafa', '#f2f2f2', '0,0,0',       false),
-    grafito: palette('Grafito', '#181818', '#202020', '#262626', '240,240,240', true),
-    papel:   palette('Papel',   '#e6e6e6', '#f1f1f1', '#fafafa', '17,17,17',    false),
+    night:    palette('Night',    '#000000', '#0b0b0b', '#111111', '255,255,255', true),
+    day:      palette('Day',      '#ffffff', '#fafafa', '#f2f2f2', '0,0,0',       false),
+    graphite: palette('Graphite', '#181818', '#202020', '#262626', '240,240,240', true),
+    paper:    palette('Paper',    '#e6e6e6', '#f1f1f1', '#fafafa', '17,17,17',    false),
   };
+  const LEGACY = { noche: 'night', dia: 'day', grafito: 'graphite', papel: 'paper' };   // ids saved before the English rename
 
-  const byHour = h => (h >= 7 && h < 19) ? 'dia' : 'noche';
+  const byHour = h => (h >= 7 && h < 19) ? 'day' : 'night';
   let choice = 'auto', timer = null;
 
   function apply() {
-    const id = choice === 'auto' ? byHour(new Date().getHours()) : (MOODS[choice] ? choice : 'noche');
+    const id = choice === 'auto' ? byHour(new Date().getHours()) : (MOODS[choice] ? choice : 'night');
     M.tokens.set(MOODS[id].vars);
     M.bus.emit('mood:changed', { choice, applied: id });
   }
@@ -34,17 +35,18 @@ function registerService(Kernel) {
     list: () => [{ id: 'auto', name: 'Auto' }, ...Object.entries(MOODS).map(([id, m]) => ({ id, name: m.name }))],
     get: () => ({ choice, applied: choice === 'auto' ? byHour(new Date().getHours()) : choice }),
     async set(id) {
-      if (id !== 'auto' && !MOODS[id]) throw new Error(`ánimo '${id}' no existe`);
+      if (id !== 'auto' && !MOODS[id]) throw new Error(`mood '${id}' does not exist`);
       choice = id; await Kernel.prefs.set('mirage.mood', id); apply();
     },
   };
 
   let off;
   return {
-    id: 'svc.mood', name: 'Servicio · Ánimo',
+    id: 'svc.mood', name: 'Service · Mood',
     async start() {
       choice = await Kernel.prefs.get('mirage.mood', 'auto');
-      if (choice !== 'auto' && !MOODS[choice]) choice = 'auto';      // preferencias de la versión a color
+      choice = LEGACY[choice] || choice;
+      if (choice !== 'auto' && !MOODS[choice]) choice = 'auto';      // preferences from the color version
       apply();
       timer = setInterval(() => { if (choice === 'auto') apply(); }, 5 * 60 * 1000);
       off = M.svc.provide('mood', api);

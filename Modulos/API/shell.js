@@ -1,5 +1,5 @@
-/* API · cell — lo que una celda puede hacer con el shell: cambiar su título,
-   abrir otras celdas (quedan unidas a ella por un "hilo"), cerrarse, instalarse. */
+/* API · cell — what a cell can do with the shell: change its title,
+   open other cells (they stay joined to it by a "thread"), close itself, install. */
 function registerAPI(Kernel) {
   const M = window.Mirage.init();
 
@@ -20,5 +20,5 @@ function registerAPI(Kernel) {
   const perms = { install: 'app.install' };
 
   let off;
-  return { id: 'api.cell', name: 'API · Celdas', start() { off = M.api.register('cell', methods, perms); }, stop() { off && off(); } };
+  return { id: 'api.cell', name: 'API · Cells', start() { off = M.api.register('cell', methods, perms); }, stop() { off && off(); } };
 }

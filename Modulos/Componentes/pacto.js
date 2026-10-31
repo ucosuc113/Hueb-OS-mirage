@@ -1,5 +1,5 @@
-/* Componente · PACTO — cuando una celda de terceros pide algo, el sistema pregunta aquí.
-   Resuelve el hueco del Kernel donde nada concedía permisos a las apps. */
+/* Component · COVENANT — when a third-party cell asks for something, the system asks here.
+   Fills the Kernel gap where nothing ever granted permissions to apps. */
 function registerComponent(Kernel) {
   const M = window.Mirage.init();
   const ui = M.ui.scope('pacto');
@@ -15,10 +15,10 @@ function registerComponent(Kernel) {
     const { cell, perm, resolve } = queue.shift();
     const what = M.caps.DESC[perm] || perm;
     box.innerHTML =
-      `<div class="pc-card"><div class="pc-top"><span class="pc-ico">${Kernel.icons.render(cell.icon)}</span><span class="pc-lbl">pacto</span></div>` +
-      `<h3>${E(cell.title)} pide permiso para ${E(what)}</h3>` +
-      '<p class="pc-sub">Es una celda de terceros: vive aislada y solo puede hablar con el sistema por esta API.</p>' +
-      '<div class="pc-btns"><button data-v="deny">Negar</button><button data-v="once">Solo ahora</button><button class="on" data-v="always">Siempre</button></div></div>';
+      `<div class="pc-card"><div class="pc-top"><span class="pc-ico">${Kernel.icons.render(cell.icon)}</span><span class="pc-lbl">covenant</span></div>` +
+      `<h3>${E(cell.title)} asks permission to ${E(what)}</h3>` +
+      '<p class="pc-sub">This is a third-party cell: it lives isolated and can only talk to the system through this API.</p>' +
+      '<div class="pc-btns"><button data-v="deny">Deny</button><button data-v="once">Just now</button><button class="on" data-v="always">Always</button></div></div>';
     box.hidden = false;
     box.onclick = e => {
       const b = e.target.closest('[data-v]'); if (!b) return;
@@ -29,7 +29,7 @@ function registerComponent(Kernel) {
   const api = { ask: (cell, perm) => new Promise(resolve => { queue.push({ cell, perm, resolve }); pump(); }) };
   let off;
   return {
-    id: 'ui.pacto', name: 'Componente · Pacto',
+    id: 'ui.pacto', name: 'Component · Covenant',
     start() {
       ui.style(`
         #pacto{position:absolute;inset:0;z-index:60;display:flex;align-items:center;justify-content:center;background:var(--scrim)}

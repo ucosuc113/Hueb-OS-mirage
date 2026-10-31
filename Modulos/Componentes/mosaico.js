@@ -1,6 +1,6 @@
-/* Componente · LENTE MOSAICO
-   La prueba de que la capa de lentes funciona: las mismas celdas (sin recargar
-   ni un iframe), pero dispuestas en una rejilla automática, estilo "tiling". */
+/* Component · MOSAIC LENS
+   Proof that the lens layer works: the same cells (without reloading a single
+   iframe), but laid out on an automatic grid, "tiling" style. */
 function registerComponent(Kernel) {
   const M = window.Mirage.init();
   const ui = M.ui.scope('mosaico');
@@ -16,7 +16,7 @@ function registerComponent(Kernel) {
     const w = (W - GAP * (cols + 1)) / cols, h = (H - GAP * (rows - 1)) / rows;
     list.forEach((c, i) => {
       const s = c.el.style, col = i % cols, row = Math.floor(i / cols);
-      /* última fila incompleta: se reparte el ancho entre las que hay */
+      /* incomplete last row: the width is shared among the cells it has */
       const inRow = row === rows - 1 ? n - cols * (rows - 1) : cols;
       const ww = row === rows - 1 ? (W - GAP * (inRow + 1)) / inRow : w;
       s.left = GAP + col * (ww + GAP) + 'px'; s.top = TOP + row * (h + GAP) + 'px'; s.width = ww + 'px'; s.height = h + 'px';
@@ -24,7 +24,7 @@ function registerComponent(Kernel) {
   }
 
   const lens = {
-    id: 'mosaico', name: 'Mosaico',
+    id: 'mosaico', name: 'Mosaic',
     enter() {
       root = document.getElementById('mirage-root');
       root.classList.add('lens-mosaico');
@@ -36,13 +36,13 @@ function registerComponent(Kernel) {
     },
     leave() { offs.forEach(f => f()); offs = []; es?.dispose(); es = null; root?.classList.remove('lens-mosaico'); },
     place: relayout,
-    fit(id) { M.cells.focus(id, { noFrameFocus: true }); },     // ya está todo a la vista
+    fit(id) { M.cells.focus(id, { noFrameFocus: true }); },     // everything is already in view
     overview() { },
   };
 
   let unreg;
   return {
-    id: 'ui.lens.mosaico', name: 'Lente · Mosaico',
+    id: 'ui.lens.mosaico', name: 'Lens · Mosaic',
     start() {
       ui.style('.lens-mosaico .cell-grip{display:none}.lens-mosaico .cell-bar{cursor:default}.lens-mosaico #world::before{opacity:.25}');
       unreg = M.lens.register(lens);

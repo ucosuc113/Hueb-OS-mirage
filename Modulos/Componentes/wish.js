@@ -1,5 +1,5 @@
-/* Componente · DESEO — reemplaza al menú inicio, al buscador y a la terminal de comandos.
-   Ctrl+Espacio (también desde dentro de una celda), o escribir cualquier letra sobre el fondo. */
+/* Component · WISH — replaces the start menu, the search box and the command terminal.
+   Ctrl+Space (also from inside a cell), or type any letter over the background. */
 function registerComponent(Kernel) {
   const M = window.Mirage.init();
   const ui = M.ui.scope('wish');
@@ -7,7 +7,7 @@ function registerComponent(Kernel) {
   el.id = 'wish'; el.hidden = true;
   el.innerHTML =
     '<div class="w-box"><div class="w-input"><span class="w-glyph">&gt;</span>' +
-    '<input type="text" spellcheck="false" autocomplete="off" placeholder="app · archivo · nota hola · 2+2 · lente mosaico · ánimo dia"><kbd>esc</kbd></div>' +
+    '<input type="text" spellcheck="false" autocomplete="off" placeholder="app · file · note hello · 2+2 · lens mosaic · mood day"><kbd>esc</kbd></div>' +
     '<ul class="w-list"></ul></div>';
   const input = el.querySelector('input'), list = el.querySelector('.w-list');
   let results = [], sel = 0, seq = 0;
@@ -22,11 +22,11 @@ function registerComponent(Kernel) {
   async function search() {
     const my = ++seq;
     const r = await M.intents.query(input.value);
-    if (my !== seq) return;                       // llegó una respuesta más nueva
+    if (my !== seq) return;                       // a newer answer arrived
     results = r; sel = 0; render();
   }
   function render() {
-    if (!results.length) { list.innerHTML = '<li class="w-empty">nada que ofrecer</li>'; return; }
+    if (!results.length) { list.innerHTML = '<li class="w-empty">nothing found</li>'; return; }
     let last = '';
     list.innerHTML = results.map((r, i) => {
       const head = r.group && r.group !== last ? `<li class="w-group">${M.util.esc(last = r.group)}</li>` : '';
@@ -39,7 +39,7 @@ function registerComponent(Kernel) {
   async function run(i) {
     const r = results[i]; if (!r) return;
     close();
-    try { await M.intents.run(r); } catch (e) { M.notify('El deseo falló', e.message); }
+    try { await M.intents.run(r); } catch (e) { M.notify('The wish failed', e.message); }
   }
 
   ui.on(input, 'input', search);
@@ -52,7 +52,7 @@ function registerComponent(Kernel) {
   ui.on(list, 'click', e => { const li = e.target.closest('.w-item'); if (li) run(+li.dataset.i); });
   ui.on(el, 'pointerdown', e => { if (e.target === el) close(); });
 
-  /* Activadores globales */
+  /* Global triggers */
   ui.on(window, 'keydown', e => {
     if ((e.ctrlKey || e.altKey) && e.code === 'Space') { e.preventDefault(); el.hidden ? open() : close(); return; }
     const t = e.target;
@@ -63,7 +63,7 @@ function registerComponent(Kernel) {
   ui.defer(M.bus.on('key:wish', () => el.hidden ? open() : close()));
 
   return {
-    id: 'ui.wish', name: 'Componente · Deseo',
+    id: 'ui.wish', name: 'Component · Wish',
     start() {
       ui.style(`
         #wish{position:absolute;inset:0;z-index:50;display:flex;justify-content:center;align-items:flex-start;padding-top:14vh;background:var(--scrim)}

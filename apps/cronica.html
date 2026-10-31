@@ -1,10 +1,10 @@
 <!doctype html>
-<html><head><meta charset="utf-8"><title>Crónica</title>
+<html><head><meta charset="utf-8"><title>Chronicle</title>
 <script type="application/json" id="wos-manifest">
-{ "id": "chronicle", "name": "Crónica", "version": "0.2.0",
+{ "id": "chronicle", "name": "Chronicle", "version": "0.2.0",
   "icon": "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><circle cx='12' cy='12' r='9'/><path d='M12 7v5l3 2'/></svg>",
-  "category": "sistema", "description": "Todo lo que ha pasado en el sistema, y cómo volver atrás",
-  "keywords": ["historial", "versiones", "deshacer", "historia", "tiempo"], "permissions": ["fs.read", "fs.write"],
+  "category": "system", "description": "Everything that has happened in the system, and how to go back",
+  "keywords": ["history", "versions", "undo", "timeline", "time"], "permissions": ["fs.read", "fs.write"],
   "singleton": true, "winWidth": 700, "winHeight": 460 }
 </script>
 <style>
@@ -26,17 +26,17 @@
 </style></head>
 <body>
   <div id="left" class="col">
-    <div class="tabs"><button id="tl" class="on">Línea de tiempo</button><button id="tf">Con versiones</button></div>
+    <div class="tabs"><button id="tl" class="on">Timeline</button><button id="tf">With versions</button></div>
     <div id="lst" class="scroll"></div>
   </div>
   <div id="right" class="col">
-    <div class="head"><b>Versiones</b><div class="muted" id="rp" style="font:12px var(--mono)">elige un archivo con historial</div></div>
+    <div class="head"><b>Versions</b><div class="muted" id="rp" style="font:12px var(--mono)">pick a file with history</div></div>
     <div id="revs" class="scroll"></div>
   </div>
 <script>
   const $ = id => document.getElementById(id);
   let mode = 'tl', cur = null;
-  const hh = t => new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  const hh = t => new Date(t).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
   const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
   async function renderList() {
@@ -44,11 +44,11 @@
     if (mode === 'tl') {
       const log = await Mirage.chronicle.log(250);
       $('lst').innerHTML = log.length ? log.map(e => `<div class="e${e.path === cur ? ' sel' : ''}" data-p="${esc(e.path || '')}"><span class="k">${e.kind}</span><span class="t">${esc(e.text)}${e.n > 1 ? ' ×' + e.n : ''}</span><small>${hh(e.t)}</small></div>`).join('')
-        : '<div class="empty muted">aún no ha pasado nada</div>';
+        : '<div class="empty muted">nothing has happened yet</div>';
     } else {
       const ps = await Mirage.chronicle.paths();
       $('lst').innerHTML = ps.length ? ps.map(p => `<div class="e${p.path === cur ? ' sel' : ''}" data-p="${esc(p.path)}"><span class="t">${esc(p.path)}</span><small>${p.count} v · ${hh(p.last)}</small></div>`).join('')
-        : '<div class="empty muted">ningún archivo de texto tiene versiones todavía</div>';
+        : '<div class="empty muted">no text file has versions yet</div>';
     }
   }
   async function showRevs(path) {
@@ -56,8 +56,8 @@
     $('rp').textContent = path;
     const revs = await Mirage.chronicle.revisions(path);
     $('revs').innerHTML = revs.length ? revs.map((r, i) =>
-      `<div class="rev"><div class="row"><b>${i === 0 ? 'más reciente' : hh(r.t)}</b><span class="muted">${r.size} car.</span><span class="grow"></span>${i === 0 ? '' : `<button data-t="${r.t}" class="primary">Restaurar</button>`}</div><pre>${esc(r.content.slice(0, 600))}</pre></div>`).join('')
-      : '<div class="empty muted">sin versiones guardadas para este archivo</div>';
+      `<div class="rev"><div class="row"><b>${i === 0 ? 'most recent' : hh(r.t)}</b><span class="muted">${r.size} chars</span><span class="grow"></span>${i === 0 ? '' : `<button data-t="${r.t}" class="primary">Restore</button>`}</div><pre>${esc(r.content.slice(0, 600))}</pre></div>`).join('')
+      : '<div class="empty muted">no saved versions for this file</div>';
     renderList();
   }
   $('tl').onclick = () => { mode = 'tl'; renderList(); };

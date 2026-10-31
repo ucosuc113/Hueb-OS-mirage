@@ -1,4 +1,4 @@
-/* Mirage Kit — base visual de cada celda. Plano, B/N, bordes de 2 px del monitor (--bw). */
+/* Mirage Kit — visual base of every cell. Flat, B/W, 2 px monitor borders (--bw). */
 *{box-sizing:border-box;border-radius:0}
 html,body{margin:0;height:100%;background:var(--cell-bg);color:var(--ink);font:14px/1.5 var(--font)}
 button,input,select,textarea{font:inherit;color:inherit}

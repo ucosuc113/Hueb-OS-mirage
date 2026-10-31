@@ -1,47 +1,61 @@
-/* Componente · LENTE MESA
-   Un plano infinito: sin escritorio, sin ventanas, sin barra de tareas.
-   · arrastrar el fondo = desplazarse   · rueda = zoom hacia el cursor
-   · lejos (zoom < 0.45) las celdas colapsan a burbujas (zoom semántico)
-   · los "hilos" unen cada celda con el proceso que la abrió (Procs del Kernel)
-   · Esc = ver todo, ⤢ / doble clic en la barra = entrar a una celda */
+/* Component · TABLE LENS
+   An infinite plane: no desktop, no windows, no taskbar.
+   · drag the background = pan   · wheel = zoom toward the cursor
+   · far away (zoom < 0.45) cells collapse into bubbles (semantic zoom)
+   · "threads" join each cell to the process that opened it (Kernel Procs)
+   · Esc = see all, ⤢ / double click on the bar = enter a cell */
 function registerComponent(Kernel) {
   const M = window.Mirage.init();
   const ui = M.ui.scope('mesa');
   const clamp = M.util.clamp;
   const MINK = 0.12, MAXK = 2.5, GRID = 48, TOP = 48;
-  /* Mundo en bucle (toro): salir por un borde = entrar por el opuesto.
-     Múltiplos de GRID para que la retícula de puntos no salte al dar la vuelta. */
-  const WRAP_W = GRID * 160, WRAP_H = GRID * 120;   // 7680 × 5760 unidades de mundo
-  const SEAM = 1200;                                 // celda más grande que no "salta" a la vista al cruzar la costura
+  /* Looping world (torus): leaving through one edge = entering through the opposite one.
+     Multiples of GRID so the dot grid does not jump when wrapping around. */
+  const WRAP_W = GRID * 160, WRAP_H = GRID * 120;   // 7680 × 5760 world units
+  const SEAM = 1200;                                 // largest cell that does not "jump" in view when crossing the seam
   const mod = (v, m) => ((v % m) + m) % m;
   const minK = () => Math.max(MINK, innerWidth / (WRAP_W - SEAM), (innerHeight - TOP) / (WRAP_H - SEAM));
   const centerY = () => (innerHeight + TOP) / 2;
 
   let root, world, plane, svg, hint, es;
   let view = { x: 0, y: 0, k: 1 };
-  let drag = null, offs = [], animTimer = null;
+  let drag = null, offs = [], animTimer = null, settleT = null, settling = false;
   const saveView = M.util.debounce(() => Kernel.prefs.set('mirage.mesa.view', view).catch(() => { }), 800);
 
   function applyView() {
     view.k = Math.max(view.k, minK());
-    /* re-centra: el punto bajo el centro de la pantalla se mantiene dentro de [0, WRAP).
-       Es un desplazamiento de un número entero de "vueltas", así que la imagen no cambia. */
+    /* re-center: the point under the screen center stays within [0, WRAP).
+       It is a shift by a whole number of "laps", so the image does not change. */
     const cx = (innerWidth / 2 - view.x) / view.k, cy = (centerY() - view.y) / view.k;
     view.x += (cx - mod(cx, WRAP_W)) * view.k;
     view.y += (cy - mod(cy, WRAP_H)) * view.k;
 
     plane.style.transform = `translate(${view.x}px,${view.y}px) scale(${view.k})`;
+    if (!settling) {
+      plane.style.willChange = 'transform';
+      clearTimeout(settleT); settleT = setTimeout(settleView, plane.classList.contains('anim') ? 620 : 220);
+    }
     const g = GRID * view.k;
     world.style.setProperty('--grid', g + 'px');
     world.style.setProperty('--gx', (view.x % g) + 'px');
     world.style.setProperty('--gy', (view.y % g) + 'px');
     root.style.setProperty('--k', view.k);
     root.classList.toggle('far', view.k < 0.45);
-    M.cells.each(placeEl); threads();     // cada celda salta a su copia más cercana
+    M.cells.each(placeEl); threads();     // each cell jumps to its nearest copy
     saveView();
   }
 
-  /* Desfase (múltiplo de la vuelta) que deja la celda en la copia más cercana al centro de la pantalla */
+  /* Once movement stops the layer is released (the browser re-rasterizes text at the real scale);
+     near 100 % the zoom snaps to 1:1 and to whole pixels so text comes out sharp. */
+  function settleView() {
+    plane.style.willChange = 'auto';
+    if (Math.abs(view.k - 1) < 0.03) view.k = 1;
+    if (view.k !== 1) return;
+    view.x = Math.round(view.x); view.y = Math.round(view.y);
+    settling = true; applyView(); settling = false;
+  }
+
+  /* Offset (a multiple of the lap) that leaves the cell in the copy nearest to the screen center */
   function wrapOff(c) {
     const cx = (innerWidth / 2 - view.x) / view.k, cy = (centerY() - view.y) / view.k;
     return {
@@ -52,8 +66,8 @@ function registerComponent(Kernel) {
   function disp(c) { const o = wrapOff(c); return { x: c.rect.x + o.x, y: c.rect.y + o.y, w: c.rect.w, h: c.rect.h }; }
   function placeEl(c) {
     const o = c._o = wrapOff(c), s = c.el.style;
-    s.left = c.rect.x + o.x + 'px'; s.top = c.rect.y + o.y + 'px';
-    s.width = c.rect.w + 'px'; s.height = c.rect.h + 'px'; s.zIndex = c.z;
+    s.left = Math.round(c.rect.x + o.x) + 'px'; s.top = Math.round(c.rect.y + o.y) + 'px';
+    s.width = Math.round(c.rect.w) + 'px'; s.height = Math.round(c.rect.h) + 'px'; s.zIndex = c.z;
   }
   function animate() { plane.classList.add('anim'); clearTimeout(animTimer); animTimer = setTimeout(() => plane.classList.remove('anim'), 560); }
 
@@ -94,14 +108,14 @@ function registerComponent(Kernel) {
       const a = disp(p), b = disp(c);
       const ax = a.x + a.w / 2, ay = a.y + a.h / 2, bx = b.x + b.w / 2, by = b.y + b.h / 2;
       const sx = Math.round((ax - bx) / WRAP_W) * WRAP_W, sy = Math.round((ay - by) / WRAP_H) * WRAP_H;
-      d += seg(ax, ay, bx + sx, by + sy);              // padre → copia más cercana del hijo
-      if (sx || sy) d += seg(ax - sx, ay - sy, bx, by); // copia del padre → hijo (el otro lado de la costura)
+      d += seg(ax, ay, bx + sx, by + sy);              // parent → nearest copy of the child
+      if (sx || sy) d += seg(ax - sx, ay - sy, bx, by); // copy of the parent → child (the other side of the seam)
     });
     svg.innerHTML = d;
   }
   function updateHint() { if (hint) hint.hidden = visibleCells().length > 0; }
 
-  /* ── interacción ── */
+  /* ── interaction ── */
   function onDown(e) {
     if (e.button !== 0 && e.button !== 1) return;
     if (e.target.closest('[data-act]') || e.target.closest('#chrome > *, #overlay > *')) return;
@@ -129,7 +143,7 @@ function registerComponent(Kernel) {
   }
   function onUp() {
     if (!drag) return;
-    if (drag.t === 'move') {                       // la posición guardada vuelve a [0, WRAP); la vista no cambia
+    if (drag.t === 'move') {                       // the saved position goes back to [0, WRAP); the view does not change
       drag.c.rect.x = mod(drag.c.rect.x, WRAP_W); drag.c.rect.y = mod(drag.c.rect.y, WRAP_H);
       place(drag.c);
     }
@@ -162,7 +176,7 @@ function registerComponent(Kernel) {
   }
 
   const lens = {
-    id: 'mesa', name: 'Mesa',
+    id: 'mesa', name: 'Table',
     async enter() {
       root = document.getElementById('mirage-root'); world = document.getElementById('world'); plane = document.getElementById('plane');
       view = await Kernel.prefs.get('mirage.mesa.view', null) || { x: innerWidth / 2 - 320, y: 90, k: 1 };
@@ -172,8 +186,8 @@ function registerComponent(Kernel) {
       plane.prepend(svg);
       hint = document.createElement('div');
       hint.className = 'mesa-hint';
-      hint.innerHTML = '<b>Mirage</b><span><kbd>Ctrl</kbd> <kbd>Espacio</kbd> o escribe para pedir algo</span><span>arrastra el fondo · rueda = zoom · <kbd>Esc</kbd> ver todo</span>';
-      es = M.ui.scope('mesa:lens');          // todo lo de la lente muere con leave()
+      hint.innerHTML = '<b>Mirage</b><span><kbd>Ctrl</kbd> <kbd>Space</kbd> or just type to ask for something</span><span>drag the background · wheel = zoom · <kbd>Esc</kbd> see all</span>';
+      es = M.ui.scope('mesa:lens');          // everything in the lens dies with leave()
       es.mount('world', hint);
       es.on(world, 'pointerdown', onDown);
       es.on(window, 'pointermove', onMove);
@@ -194,13 +208,14 @@ function registerComponent(Kernel) {
       root?.classList.remove('lens-mesa', 'far', 'dragging'); root?.style.removeProperty('--k');
       plane.style.transform = 'none'; plane.classList.remove('anim');
       world.style.removeProperty('--grid'); world.style.removeProperty('--gx'); world.style.removeProperty('--gy');
+      clearTimeout(settleT);
       svg?.remove(); es?.dispose(); es = null; drag = null;
     },
     place,
     suggest(c, parent) {
       if (parent) {
-        let sib = 0; M.cells.each(o => { if (o.parent === parent.id) sib++; });   // los hermanos se escalonan
-        const pd = disp(parent);                                                  // junto a donde ves al padre
+        let sib = 0; M.cells.each(o => { if (o.parent === parent.id) sib++; });   // siblings are staggered
+        const pd = disp(parent);                                                  // next to where you see the parent
         return { x: pd.x + pd.w + 70 + sib * 36, y: pd.y + 30 + sib * 56 };
       }
       const n = visibleCells().length;
@@ -212,7 +227,7 @@ function registerComponent(Kernel) {
 // lol
   let unreg;
   return {
-    id: 'ui.lens.mesa', name: 'Lente · Mesa',
+    id: 'ui.lens.mesa', name: 'Lens · Table',
     start() {
       ui.style(`
         .mesa-hint{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);display:flex;flex-direction:column;align-items:center;gap:8px;
@@ -220,7 +235,7 @@ function registerComponent(Kernel) {
         .mesa-hint[hidden]{display:none}
         .mesa-hint b{font:600 20px/1 var(--mono);letter-spacing:.5em;padding-left:.5em;text-transform:uppercase;color:var(--ink);margin-bottom:10px}
         .mesa-hint kbd{font:inherit;border:var(--bw) solid var(--line);padding:0 5px;border-radius:2px}
-        /* hilos: 2 px reales del monitor a cualquier zoom (non-scaling-stroke) */
+        /* threads: 2 real monitor pixels at any zoom (non-scaling-stroke) */
         #world svg path{fill:none;stroke:var(--ink);stroke-width:2;stroke-dasharray:2 8;opacity:.45;vector-effect:non-scaling-stroke}
         #world svg path.dot{stroke-width:10;stroke-linecap:square;stroke-dasharray:none;opacity:.7}
       `);

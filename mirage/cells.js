@@ -1,9 +1,9 @@
 /* ═══════════════════════════════════════════════════════════════
    MIRAGE · L2 · CELL HOST
-   Una celda = un proceso del Kernel (Procs) + un iframe aislado + una
-   tarjeta en el DOM. Este archivo es dueño de los tres y los mantiene
-   sincronizados: matar el proceso cierra la tarjeta y viceversa.
-   La geometría NO se decide aquí (eso es de la lente activa).
+   A cell = a Kernel process (Procs) + an isolated iframe + a card
+   in the DOM. This file owns all three and keeps them in sync:
+   killing the process closes the card and vice versa.
+   Geometry is NOT decided here (that belongs to the active lens).
 ═══════════════════════════════════════════════════════════════ */
 ;(function (global) {
   'use strict';
@@ -15,11 +15,11 @@
   let seq = 0, zTop = 10, focusedId = null;
 
   const SANDBOX_TRUSTED   = 'allow-scripts allow-same-origin allow-forms allow-modals allow-popups allow-downloads';
-  const SANDBOX_UNTRUSTED = 'allow-scripts allow-forms allow-modals allow-downloads';   // origen opaco: solo IPC
+  const SANDBOX_UNTRUSTED = 'allow-scripts allow-forms allow-modals allow-downloads';   // opaque origin: IPC only
 
   const textCache = {};
   async function fetchText(url) {
-    if (!textCache[url]) { const r = await fetch(url, { cache: 'no-store' }); if (!r.ok) throw new Error('no se pudo leer ' + url); textCache[url] = await r.text(); }
+    if (!textCache[url]) { const r = await fetch(url, { cache: 'no-store' }); if (!r.ok) throw new Error('could not read ' + url); textCache[url] = await r.text(); }
     return textCache[url];
   }
 
@@ -29,30 +29,30 @@
   });
   const send = (c, event, data) => { try { c.frame?.contentWindow?.postMessage({ mirage: 1, t: 'event', event, data }, '*'); } catch { } };
 
-  /* ── DOM de una celda ── */
+  /* ── DOM of a cell ── */
   function buildEl(c) {
     const el = document.createElement('section');
     el.className = 'cell'; el.dataset.cell = c.id;
     el.innerHTML =
       '<header class="cell-bar"><span class="cell-ico"></span><span class="cell-title"></span>' +
-      '<span class="cell-btns"><button data-act="fit" title="Entrar / ajustar">□</button>' +
-      '<button data-act="stow" title="Guardar en el bolsillo">–</button>' +
-      '<button data-act="close" title="Cerrar">×</button></span></header>' +
+      '<span class="cell-btns"><button data-act="fit" title="Enter / fit">□</button>' +
+      '<button data-act="stow" title="Put in the pocket">–</button>' +
+      '<button data-act="close" title="Close">×</button></span></header>' +
       '<div class="cell-body"><iframe></iframe><div class="cell-bubble"><span class="b-ico"></span><span class="b-title"></span></div></div>' +
       '<i class="cell-grip"></i>';
     return el;
   }
   function paint(c) {
-    const ico = K.icons.render(c.icon);          // sin size: el CSS lo dimensiona (1em)
+    const ico = K.icons.render(c.icon);          // no size: the CSS sizes it (1em)
     c.el.querySelector('.cell-ico').innerHTML = ico;
     c.el.querySelector('.cell-title').textContent = c.title;
     c.el.querySelector('.b-ico').innerHTML = ico;
     c.el.querySelector('.b-title').textContent = c.title;
   }
 
-  /* ── srcdoc: HTML de la app + <base> + tokens + kit + SDK ──
-     Se usa srcdoc (no navegación): la navegación de iframes no pasa por el
-     Service Worker del bootloader, pero fetch() sí — ver ARCHITECTURE.md. */
+  /* ── srcdoc: the app's HTML + <base> + tokens + kit + SDK ──
+     srcdoc is used (not navigation): iframe navigation does not go through the
+     bootloader's Service Worker, but fetch() does — see ARCHITECTURE.md. */
   async function buildSrcdoc(app) {
     const [html, sdk, kit] = await Promise.all([M.loadAppHtml(app), fetchText('./mirage/sdk.js'), fetchText('./mirage/kit.css')]);
     const base = new URL(String(app.entry).startsWith('fs:') ? './' : app.entry, document.baseURI).href;
@@ -69,7 +69,7 @@
     }).catch(() => { });
   }, 700);
 
-  /* ── API pública de celdas ── */
+  /* ── Public cell API ── */
   M.cells = {
     each: fn => cells.forEach(fn),
     get: id => cells.get(id),
@@ -79,7 +79,7 @@
 
     async open(appId, opts = {}) {
       const app = await K.apps.get(appId);
-      if (!app) throw new Error(`cells.open: la app '${appId}' no existe`);
+      if (!app) throw new Error(`cells.open: app '${appId}' does not exist`);
 
       if (app.singleton) {
         const ex = [...cells.values()].find(c => c.appId === appId);
@@ -101,7 +101,7 @@
 
       let srcdoc;
       try { srcdoc = await buildSrcdoc(app); }
-      catch (e) { K.procs.kill(proc.pid, { force: true }); M.notify(`No se pudo abrir ${app.name || appId}`, e.message, '⚠'); throw e; }
+      catch (e) { K.procs.kill(proc.pid, { force: true }); M.notify(`Could not open ${app.name || appId}`, e.message, '⚠'); throw e; }
 
       c.el = buildEl(c);
       paint(c);
@@ -147,8 +147,8 @@
       M.bus.emit('cell:changed', pub(c)); persist(); return true;
     },
 
-    /* Cerrar = matar el proceso; el listener de procs:kill destruye la tarjeta
-       (y las de sus hijos, porque Procs.kill es en cascada). */
+    /* Close = kill the process; the procs:kill listener destroys the card
+       (and its children's, because Procs.kill cascades). */
     close(id) {
       const c = cells.get(id); if (!c) return false;
       K.procs.kill(c.pid, { force: true });
@@ -166,7 +166,7 @@
       persist();
     },
 
-    /* Para quien cambia rect/título desde fuera (lentes, apps) */
+    /* For whoever changes rect/title from outside (lenses, apps) */
     touch(id) { const c = cells.get(id); if (c) { M.bus.emit('cell:changed', pub(c)); persist(); } },
     setTitle(id, title) {
       const c = cells.get(id); if (!c) return;
@@ -192,15 +192,15 @@
     _start(kernel) {
       K = kernel;
 
-      /* Un proceso muerto desde fuera (Constelación, Procs.kill) cierra su celda */
+      /* A process killed from outside (Constellation, Procs.kill) closes its cell */
       K.on('procs:kill', ({ pid }) => { const c = this.byPid(pid); if (c) this._destroy(c); });
 
-      /* Archivos, atajos, etc. piden apps con este evento del Kernel */
+      /* Files, shortcuts, etc. ask for apps through this Kernel event */
       K.on('shell:launch', ({ appId, filePath, startPath }) => {
         this.open(appId, { args: { filePath, startPath } }).catch(e => console.warn('[Mirage:cells] shell:launch:', e.message));
       });
 
-      /* Compatibilidad: el Kernel espera un "driver" de ventanas */
+      /* Compatibility: the Kernel expects a window "driver" */
       K.windows.registerDriver({
         list: () => this.list(),
         getState: pid => { const c = this.byPid(pid); return c ? pub(c) : null; },
@@ -209,13 +209,13 @@
         close: pid => { const c = this.byPid(pid); return c ? this.close(c.id) : false; },
       });
 
-      /* Clic en un iframe no burbujea al padre: se detecta por el cambio de foco */
+      /* A click inside an iframe does not bubble to the parent: it is detected through the focus change */
       global.addEventListener('blur', () => setTimeout(() => {
         const a = document.activeElement;
         if (a && a.tagName === 'IFRAME') { const c = [...cells.values()].find(x => x.frame === a); if (c && c.id !== focusedId) this.focus(c.id, { noFrameFocus: true }); }
       }, 0));
 
-      /* Acciones de la barra de la tarjeta (independientes de la lente) */
+      /* Card bar actions (independent of the lens) */
       document.addEventListener('click', e => {
         const btn = e.target.closest?.('.cell [data-act]');
         const bubble = e.target.closest?.('.cell-bubble');
@@ -226,7 +226,7 @@
         else if (bubble) { this.focus(id, { noFrameFocus: true }); M.lens.current?.fit?.(id); }
       });
 
-      /* Todo cambio de tokens llega a las celdas; también cualquier tópico al que se suscriban */
+      /* Every token change reaches the cells; so does any topic they subscribe to */
       M.bus.on('tokens', ({ css }) => cells.forEach(c => send(c, 'tokens', { css })));
       M.bus.on('*', (topic, data) => cells.forEach(c => { if (c.subs.has(topic)) send(c, topic, data); }));
 
@@ -234,14 +234,14 @@
     },
   };
 
-  /* ── IPC: toda llamada de una celda llega aquí ── */
+  /* ── IPC: every call from a cell arrives here ── */
   function cellBySource(src) { for (const c of cells.values()) if (c.frame && c.frame.contentWindow === src) return c; return null; }
 
   async function onMessage(ev) {
     const d = ev.data;
     if (!d || d.mirage !== 1) return;
     const c = cellBySource(ev.source);
-    if (!c) return;                                   // solo se atiende a celdas que el shell abrió
+    if (!c) return;                                   // only cells the shell opened are served
     if (d.t === 'ready') {
       c.frame.contentWindow.postMessage({ mirage: 1, t: 'hello', data: { cellId: c.id, appId: c.appId, args: c.args, trusted: c.trusted, css: M.tokens.css, theme: M.tokens.vars } }, '*');
     } else if (d.t === 'key') {
@@ -253,7 +253,7 @@
     }
   }
 
-  /* Tópicos a los que una celda puede suscribirse */
+  /* Topics a cell may subscribe to */
   async function topicAllowed(c, topic) {
     if (topic.startsWith('k:fs:')) return M.caps.has(c, 'fs.read');
     if (topic.startsWith('k:prefs:') || topic.startsWith('k:users:')) return c.trusted;

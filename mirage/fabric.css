@@ -1,8 +1,8 @@
-/* MIRAGE · FABRIC — lenguaje visual: plano, blanco y negro, sin degradados, sin sombras,
-   sin esquinas redondeadas. Color sólido; la jerarquía se hace con opacidad.
-   Todo borde mide 2 píxeles reales del monitor: --bw = 2 / devicePixelRatio (lo fija el Substrate).
-   Dentro de la Mesa el plano se escala, así que la caja de la celda divide por --k para que
-   su borde siga midiendo 2 px en pantalla a cualquier zoom. */
+/* MIRAGE · FABRIC — visual language: flat, black and white, no gradients, no shadows,
+   no rounded corners. Solid color; hierarchy is made with opacity.
+   Every border is 2 real monitor pixels: --bw = 2 / devicePixelRatio (set by the Substrate).
+   Inside the Table the plane is scaled, so the cell box divides by --k so that
+   its border still measures 2 px on screen at any zoom. */
 :root{
   --bg:#000; --cell-bg:#0b0b0b; --panel-solid:#111; --scrim:rgba(0,0,0,.78);
   --ink:#fff; --ink2:rgba(255,255,255,.55); --accent:#fff; --on-accent:#000; --danger:#fff;
@@ -15,25 +15,25 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--bg);color:var(--
 button{font:inherit}
 #mirage-root{position:fixed;inset:0;overflow:hidden}
 
-/* ── Mundo ── */
+/* ── World ── */
 #world{position:absolute;inset:0;overflow:hidden;background:var(--bg)}
-/* retícula de puntos: máscara de imagen (no degradado) pintada con un color sólido */
+/* dot grid: image mask (not a gradient) painted with a solid color */
 #world::before{content:"";position:absolute;inset:0;pointer-events:none;background:var(--dot);
   -webkit-mask-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='48' height='48'%3E%3Crect width='2' height='2'/%3E%3C/svg%3E");
   mask-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='48' height='48'%3E%3Crect width='2' height='2'/%3E%3C/svg%3E");
   -webkit-mask-size:var(--grid,48px) var(--grid,48px);mask-size:var(--grid,48px) var(--grid,48px);
   -webkit-mask-position:var(--gx,0) var(--gy,0);mask-position:var(--gx,0) var(--gy,0)}
 #world.panning{cursor:grabbing}
-#plane{position:absolute;left:0;top:0;width:0;height:0;transform-origin:0 0;will-change:transform}
+#plane{position:absolute;left:0;top:0;width:0;height:0;transform-origin:0 0}
 #plane.anim{transition:transform .35s cubic-bezier(.2,.8,.2,1)}
 #chrome,#overlay{position:absolute;inset:0;pointer-events:none}
 #chrome>*,#overlay>*{pointer-events:auto}
 
-/* ── Iconos: trazo lineal que hereda el color del texto; los emoji se pasan a gris ── */
+/* ── Icons: linear stroke that inherits the text color; emoji are turned gray ── */
 .ico,.cell-ico,.b-ico,.w-ico,.b-chip i,.pc-ico{display:inline-flex;align-items:center;justify-content:center;filter:grayscale(1)}
 .ico svg,.cell-ico svg,.b-ico svg,.w-ico svg,.b-chip svg,.pc-ico svg{fill:none;stroke:currentColor;stroke-width:1.75;stroke-linecap:square;stroke-linejoin:miter;width:1em;height:1em}
 
-/* ── Celda ── */
+/* ── Cell ── */
 .cell{position:absolute;display:flex;flex-direction:column;background:var(--cell-bg);container-type:size;
   border:calc(var(--bw) / var(--k,1)) solid var(--edge)}
 .cell.focused{border-color:var(--ink)}
@@ -52,7 +52,7 @@ button{font:inherit}
   border-right:calc(var(--bw) / var(--k,1)) solid var(--ink2);border-bottom:calc(var(--bw) / var(--k,1)) solid var(--ink2)}
 .cell-bubble{display:none;position:absolute;inset:0;flex-direction:column;align-items:center;justify-content:center;gap:10px;
   background:var(--cell-bg);cursor:pointer;text-align:center;padding:12px;color:var(--ink)}
-/* --k = escala actual de la Mesa: la burbuja mantiene un tamaño visual constante al alejarse */
+/* --k = current Table scale: the bubble keeps a constant visual size when zooming out */
 .cell-bubble .b-ico{font-size:min(calc(48px / var(--k,1)),40cqmin);line-height:1}
 .cell-bubble .b-title{font:600 min(calc(12px / var(--k,1)),12cqmin)/1.2 var(--mono);letter-spacing:.1em;text-transform:uppercase}
 .dragging iframe{pointer-events:none}
@@ -61,7 +61,7 @@ button{font:inherit}
 .far .cell-body iframe{visibility:hidden}
 .far .cell-bar{display:none}
 
-/* ── Arranque y rescate ── */
+/* ── Startup and rescue ── */
 #splash{position:absolute;inset:0;z-index:99;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;background:var(--bg);transition:opacity .5s}
 #splash.gone{opacity:0;pointer-events:none}
 .sp-name{font:600 20px/1 var(--mono);letter-spacing:.5em;text-transform:uppercase;padding-left:.5em}

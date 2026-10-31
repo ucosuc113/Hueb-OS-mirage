@@ -1,61 +1,122 @@
 <!doctype html>
-<html><head><meta charset="utf-8"><title>Ajustes</title>
+<html><head><meta charset="utf-8"><title>Settings</title>
 <script type="application/json" id="wos-manifest">
-{ "id": "config", "name": "Ajustes", "version": "0.2.0",
+{ "id": "config", "name": "Settings", "version": "0.3.0",
   "icon": "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M4 7h9M19 7h1M4 17h1M11 17h9'/><circle cx='16' cy='7' r='2.5'/><circle cx='8' cy='17' r='2.5'/></svg>",
-  "category": "sistema", "description": "Luz, lente, perfil y pactos con las celdas",
-  "keywords": ["configuración", "tema", "luz", "permisos", "usuario"], "permissions": ["system.config"],
-  "singleton": true, "winWidth": 520, "winHeight": 520 }
+  "category": "system", "description": "The system notebook: profile, motion, covenants, shortcuts and status",
+  "keywords": ["settings", "preferences", "configuration", "user", "profile", "permissions", "animations", "shortcuts"], "permissions": ["system.config"],
+  "singleton": true, "winWidth": 680, "winHeight": 460 }
 </script>
 <style>
-  body{overflow:auto;padding:18px 20px 28px}
-  section{margin-bottom:26px} section>.label{margin-bottom:10px}
-  .opts{display:flex;flex-wrap:wrap;gap:0}
-  .opts button{margin:0 calc(var(--bw) * -1) calc(var(--bw) * -1) 0}
-  .kv{display:grid;grid-template-columns:auto 1fr;gap:4px 18px;font:12px var(--mono)} .kv span:nth-child(odd){color:var(--ink2)}
-  .pact{display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:var(--bw) solid var(--line);flex-wrap:wrap}
+  html,body{overflow:hidden}
+  body{display:flex}
+  /* spine with tabs */
+  .spine{width:176px;flex:none;display:flex;flex-direction:column;padding:16px 0;border-right:var(--bw) dashed var(--edge)}
+  .spine h1{padding:0 16px 14px;font:600 12px/1 var(--mono);letter-spacing:.32em;text-transform:uppercase}
+  .tab{display:flex;gap:10px;align-items:baseline;width:100%;padding:10px 16px;border:0;border-left:calc(var(--bw) * 2) solid transparent;
+    text-align:left;font:12px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--ink2)}
+  .tab b{font-weight:400;opacity:.6}
+  .tab:hover:not(:disabled){color:var(--ink);border-left-color:var(--edge)}
+  .tab.on{background:transparent;color:var(--ink);border-left-color:var(--ink)}
+  .sp{flex:1}
+  .note{padding:0 16px;font:11px/1.5 var(--mono);color:var(--ink2)}
+  /* page with ruled lines that draw themselves */
+  .page{flex:1;min-width:0;overflow:auto;padding:20px 26px 30px}
+  .page h2{margin:0 0 4px;font:600 20px/1.1 var(--mono);letter-spacing:.04em}
+  .sub{margin:0 0 14px;color:var(--ink2);font:12px/1.5 var(--mono)}
+  .line{position:relative;display:flex;align-items:center;gap:16px;min-height:52px;padding:10px 0}
+  .line::after{content:"";position:absolute;left:0;right:0;bottom:0;border-bottom:var(--bw) dashed var(--line);
+    transform-origin:left;animation:rule .45s cubic-bezier(.2,.8,.2,1) both;animation-delay:calc(var(--n, 0) * 70ms)}
+  @keyframes rule{from{transform:scaleX(0)}}
+  .hint{margin-top:2px;font:11px/1.4 var(--mono);color:var(--ink2)}
+  .seal{width:56px;height:56px;flex:none;display:flex;align-items:center;justify-content:center;border:var(--bw) solid var(--ink);font:600 22px/1 var(--mono);transform:rotate(-3deg)}
+  .row input{width:190px}
+  /* switch */
+  .sw{position:relative;width:46px;height:24px;padding:0;flex:none;border:var(--bw) solid var(--ink)}
+  .sw::after{content:"";position:absolute;top:50%;left:4px;width:12px;height:12px;margin-top:-6px;background:var(--ink);transition:left .15s}
+  .sw.on{background:var(--ink)} .sw.on::after{left:calc(100% - 16px);background:var(--bg)}
+  .opts{display:flex}
+  .opts button{margin:0 calc(var(--bw) * -1) 0 0}
+  .kv{display:grid;grid-template-columns:auto 1fr;gap:8px 22px;font:12px/1.4 var(--mono);margin-top:6px}
+  .kv span:nth-child(odd){color:var(--ink2);text-transform:uppercase;letter-spacing:.06em}
+  .keys{display:grid;grid-template-columns:auto 1fr;gap:10px 20px;align-items:baseline;margin-top:6px;font-size:13px}
+  kbd{display:inline-block;padding:0 6px;border:var(--bw) solid var(--edge);font:11px/1.6 var(--mono)}
+  .pact{display:flex;align-items:center;gap:8px;padding:10px 0;border-bottom:var(--bw) dashed var(--line);flex-wrap:wrap}
   .pact .tag{cursor:pointer} .pact .tag:hover{background:var(--ink);color:var(--cell-bg);border-color:var(--ink)}
 </style></head>
 <body>
-  <section><div class="label">Luz</div><div id="moods" class="opts"></div>
-    <p class="muted" id="moodnote" style="font:11px var(--mono);margin:10px 0 0"></p></section>
-  <section><div class="label">Lente · cómo se disponen las celdas</div><div id="lenses" class="opts"></div></section>
-  <section><div class="label">Perfil</div>
-    <div class="row"><input id="nm" class="grow"><button id="sv" class="primary">Guardar</button></div></section>
-  <section><div class="label">Pactos con celdas de terceros</div><div id="pacts"></div></section>
-  <section><div class="label">Sistema</div><div class="kv" id="info"></div></section>
+  <nav class="spine"><h1>Settings</h1><div id="tabs"></div><div class="sp"></div>
+    <div class="note">light and lens: in the Fold<br>Alt + M</div></nav>
+  <main class="page" id="page"></main>
 <script>
   const $ = id => document.getElementById(id);
-  const DESC = { 'fs.read': 'leer archivos', 'fs.write': 'escribir archivos', 'fs.delete': 'borrar archivos', 'notifications.send': 'avisos', 'proc.kill': 'cerrar procesos', 'system.config': 'configuración', 'app.install': 'instalar' };
-  const NONE = '<span class="muted" style="font:12px var(--mono)">ninguna celda de terceros ha pedido nada</span>';
+  const E = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const DESC = { 'fs.read': 'read files', 'fs.write': 'write files', 'fs.delete': 'delete files', 'notifications.send': 'alerts', 'proc.kill': 'close processes', 'system.config': 'settings', 'app.install': 'install' };
+  const KEYS = [['Ctrl + Space', 'opens the Wish'], ['Alt + M', 'opens the Fold (menu)'], ['any letter', 'types straight into the Wish'],
+    ['Esc', 'see the whole table'], ['+  −  0', 'zoom the Table; 0 goes back to 100 %'], ['← ↑ → ↓', 'pan the Table'],
+    ['double click', 'on a bar: enter the cell · on the background: see all'], ['Shift / F8', 'at startup: safe mode']];
+  const TABS = [['profile', 'Profile'], ['motion', 'Motion'], ['covenants', 'Covenants'], ['shortcuts', 'Shortcuts'], ['system', 'System']];
   const fmtUp = s => s < 60 ? s + ' s' : s < 3600 ? Math.floor(s / 60) + ' min' : Math.floor(s / 3600) + ' h ' + Math.floor(s % 3600 / 60) + ' min';
 
-  async function render() {
-    const a = await Mirage.sys.appearance();
-    $('moods').innerHTML = a.moods.map(m => `<button class="${a.mood.choice === m.id ? 'on' : ''}" data-mood="${m.id}">${m.name}</button>`).join('');
-    $('moodnote').textContent = a.mood.choice === 'auto' ? `auto: ahora toca «${a.mood.applied}» (día 7–19 h)` : '';
-    $('lenses').innerHTML = a.lenses.map(l => `<button class="${a.lens === l.id ? 'on' : ''}" data-lens="${l.id}">${l.name}</button>`).join('');
+  const head = (t, s) => `<h2>${t}</h2><p class="sub">${s}</p>`;
+  const line = (n, label, hint, ctl) => `<div class="line" style="--n:${n}"><div class="grow"><div>${label}</div>${hint ? `<div class="hint">${hint}</div>` : ''}</div>${ctl}</div>`;
+  const sw = (k, on) => `<button class="sw${on ? ' on' : ''}" data-sw="${k}" role="switch" aria-checked="${on}"></button>`;
 
-    const u = await Mirage.sys.profile();
-    if (u && document.activeElement !== $('nm')) $('nm').value = u.name;
-
-    const g = (await Mirage.sys.grants()).filter(x => x.granted.length || x.requested.length);
-    $('pacts').innerHTML = g.length ? g.map(x => `<div class="pact"><b>${x.name}</b>${x.granted.map(p => `<span class="tag" data-app="${x.appId}" data-perm="${p}" title="Revocar">${DESC[p] || p} ×</span>`).join('')}${x.requested.map(p => `<span class="tag" style="opacity:.5">pidió: ${DESC[p] || p}</span>`).join('')}</div>`).join('') : NONE;
-
+  async function infoHtml() {
     const i = await Mirage.sys.info();
-    $('info').innerHTML = [['kernel', i.kernel], ['compilación', i.build], ['mirage', i.mirage], ['sesión', '#' + i.session.count], ['encendido', fmtUp(i.uptime)], ['celdas / catálogo', `${i.cells} / ${i.apps}`], ['modo seguro', i.safeMode ? 'sí' : 'no']]
-      .map(([k, v]) => `<span>${k}</span><span>${v}</span>`).join('');
+    return [['kernel', i.kernel], ['build', i.build], ['mirage', i.mirage], ['session', '#' + i.session.count], ['uptime', fmtUp(i.uptime)],
+      ['cells / catalog', `${i.cells} / ${i.apps}`], ['safe mode', i.safeMode ? 'yes' : 'no']].map(([k, v]) => `<span>${k}</span><span>${E(v)}</span>`).join('');
   }
-  document.addEventListener('click', async e => {
-    const t = e.target.closest('[data-mood],[data-lens],[data-perm]'); if (!t) return;
-    try {
-      if (t.dataset.mood) await Mirage.sys.setMood(t.dataset.mood);
-      else if (t.dataset.lens) await Mirage.sys.setLens(t.dataset.lens);
-      else await Mirage.sys.revoke(t.dataset.app, t.dataset.perm);
-    } catch (err) { alert(err.message); }
-    render();
-  });
-  $('sv').onclick = async () => { await Mirage.sys.updateProfile({ name: $('nm').value }); render(); };
 
-  Mirage.ready.then(() => { render(); setInterval(render, 5000); Mirage.on('k:permissions:granted', render); Mirage.on('k:permissions:revoked', render); });
+  const PAGES = {
+    async profile() {
+      const u = await Mirage.sys.profile();
+      const ini = (u?.name || '?').trim().slice(0, 2).toUpperCase();
+      return head('Profile', 'who you are to the system') +
+        `<div class="line" style="--n:0"><div class="seal">${E(ini)}</div><div class="grow"><b>${E(u?.name || 'no session')}</b><div class="hint">role ${E(u?.role || '—')} · id ${E(u?.id || '—')}</div></div></div>` +
+        line(1, 'Name', 'shown in the Pulse and on the Lock screen', `<div class="row"><input id="nm" value="${E(u?.name || '')}" maxlength="40"><button id="sv" class="primary">Save</button></div>`);
+    },
+    async motion() {
+      const on = (await Mirage.store.get('anim', true)) !== false, sp = +(await Mirage.store.get('speed', 1)) || 1;
+      return head('Motion', 'how cells appear and go away') +
+        line(0, 'Animations', 'dot → line → sheet, and back when closing', sw('anim', on)) +
+        line(1, 'Speed', '1× = half a second', `<div class="opts">${[0.5, 1, 1.5, 2].map(v => `<button class="${v === sp ? 'on' : ''}" data-speed="${v}">${v}×</button>`).join('')}</div>`) +
+        line(2, 'Reduced motion', 'if your system asks for it, animations switch off by themselves', '<span class="tag">automatic</span>');
+    },
+    async covenants() {
+      const g = (await Mirage.sys.grants()).filter(x => x.granted.length || x.requested.length);
+      return head('Covenants', 'what each third-party cell may do') + (g.length
+        ? g.map(x => `<div class="pact"><b>${E(x.name)}</b>${x.granted.map(p => `<span class="tag" data-app="${E(x.appId)}" data-perm="${E(p)}" title="Revoke">${E(DESC[p] || p)} ×</span>`).join('')}${x.requested.map(p => `<span class="tag" style="opacity:.5">asked: ${E(DESC[p] || p)}</span>`).join('')}</div>`).join('')
+        : '<p class="muted" style="font:12px var(--mono)">no third-party cell has asked for anything</p>');
+    },
+    async shortcuts() { return head('Shortcuts', 'the whole system at a glance') + `<div class="keys">${KEYS.map(([k, d]) => `<span><kbd>${k}</kbd></span><span>${d}</span>`).join('')}</div>`; },
+    async system() { return head('System', 'live status') + `<div class="kv" id="info">${await infoHtml()}</div>`; },
+  };
+
+  let cur = 'profile', seq = 0;
+  async function show() {
+    const my = ++seq;
+    $('tabs').innerHTML = TABS.map(([id, n], i) => `<button class="tab${id === cur ? ' on' : ''}" data-tab="${id}"><b>${String(i + 1).padStart(2, '0')}</b>${n}</button>`).join('');
+    const html = await PAGES[cur]();
+    if (my !== seq) return;
+    $('page').innerHTML = html; $('page').scrollTop = 0;
+  }
+
+  document.addEventListener('click', async e => {
+    const t = e.target.closest('[data-tab],[data-sw],[data-speed],[data-perm],#sv'); if (!t) return;
+    try {
+      if (t.dataset.tab) { cur = t.dataset.tab; show(); }
+      else if (t.dataset.sw) { const nv = !t.classList.contains('on'); await Mirage.store.set(t.dataset.sw, nv); t.classList.toggle('on', nv); t.setAttribute('aria-checked', nv); }
+      else if (t.dataset.speed) { await Mirage.store.set('speed', +t.dataset.speed); document.querySelectorAll('[data-speed]').forEach(b => b.classList.toggle('on', b === t)); }
+      else if (t.dataset.perm) { await Mirage.sys.revoke(t.dataset.app, t.dataset.perm); show(); }
+      else if (t.id === 'sv') { await Mirage.sys.updateProfile({ name: $('nm').value }); show(); }
+    } catch (err) { alert(err.message); }
+  });
+
+  Mirage.ready.then(() => {
+    show();
+    setInterval(async () => { if (cur === 'system' && $('info')) $('info').innerHTML = await infoHtml(); }, 5000);
+    Mirage.on('k:permissions:granted', () => cur === 'covenants' && show());
+    Mirage.on('k:permissions:revoked', () => cur === 'covenants' && show());
+  });
 </script></body></html>

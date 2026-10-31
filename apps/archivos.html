@@ -1,10 +1,10 @@
 <!doctype html>
-<html><head><meta charset="utf-8"><title>Archivos</title>
+<html><head><meta charset="utf-8"><title>Files</title>
 <script type="application/json" id="wos-manifest">
-{ "id": "files", "name": "Archivos", "version": "0.2.0",
+{ "id": "files", "name": "Files", "version": "0.2.0",
   "icon": "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M3 6h7l2 2h9v11H3z'/></svg>",
-  "category": "sistema", "description": "Explora, crea, mueve e instala desde /device",
-  "keywords": ["carpetas", "explorador", "files"], "permissions": ["fs.read", "fs.write", "fs.delete"],
+  "category": "system", "description": "Browse, create, move and install from /device",
+  "keywords": ["folders", "explorer", "files", "documents"], "permissions": ["fs.read", "fs.write", "fs.delete"],
   "singleton": false, "winWidth": 640, "winHeight": 460 }
 </script>
 <style>
@@ -24,18 +24,18 @@
 </style></head>
 <body>
   <div class="bar">
-    <button id="up">Subir</button>
+    <button id="up">Up</button>
     <div id="crumbs"></div>
-    <button id="nf">+ Carpeta</button><button id="nt">+ Archivo</button>
-    <button id="up2" title="Importar desde tu equipo">Importar</button><input id="file" type="file" multiple hidden>
+    <button id="nf">+ Folder</button><button id="nt">+ File</button>
+    <button id="up2" title="Import from your computer">Import</button><input id="file" type="file" multiple hidden>
   </div>
   <div id="list"></div>
   <div class="bar foot">
-    <button id="open" disabled>Abrir</button><button id="ren" disabled>Renombrar</button>
-    <button id="inst" disabled title="Registrar este .html como celda">Instalar celda</button>
-    <button id="del" class="danger" disabled>Borrar</button><span id="msg" class="muted grow" style="text-align:right;font:11px var(--mono)"></span>
+    <button id="open" disabled>Open</button><button id="ren" disabled>Rename</button>
+    <button id="inst" disabled title="Register this .html as a cell">Install cell</button>
+    <button id="del" class="danger" disabled>Delete</button><span id="msg" class="muted grow" style="text-align:right;font:11px var(--mono)"></span>
   </div>
-  <form id="ask"><input id="askin" autocomplete="off"><button class="primary">Aceptar</button><button type="button" id="askx">Cancelar</button></form>
+  <form id="ask"><input id="askin" autocomplete="off"><button class="primary">OK</button><button type="button" id="askx">Cancel</button></form>
 <script>
   const $ = id => document.getElementById(id);
   let cwd = '/device', sel = null, items = [];
@@ -49,20 +49,20 @@
     cwd = p; sel = null;
     try { items = await Mirage.fs.list(p); } catch (e) { items = []; msg(e.message); }
     render();
-    Mirage.cell.setTitle(p === '/device' ? 'Archivos' : p.split('/').pop());
+    Mirage.cell.setTitle(p === '/device' ? 'Files' : p.split('/').pop());
   }
   function render() {
     const parts = cwd.split('/').filter(Boolean);
     $('crumbs').innerHTML = parts.map((s, i) => `<a data-p="/${parts.slice(0, i + 1).join('/')}">${s}</a>`).join('<span class="muted">/</span>');
     $('list').innerHTML = items.length ? items.map(it =>
       `<div class="it${sel === it.id ? ' sel' : ''}" data-id="${it.id}"><span class="k">${kind(it)}</span><span class="n">${it.name}${it.type === 'dir' ? '/' : ''}</span><small>${it.type === 'dir' ? '' : fmt(it.size)}</small></div>`).join('')
-      : '<div id="empty" class="muted">carpeta vacía</div>';
+      : '<div id="empty" class="muted">empty folder</div>';
     const cur = items.find(i => i.id === sel);
     $('open').disabled = $('ren').disabled = $('del').disabled = !cur;
     $('inst').disabled = !(cur && /\.html?$/i.test(cur.name));
     $('up').disabled = cwd === '/device';
   }
-  const open = async it => { if (it.type === 'dir') go(it.id); else { const r = await Mirage.fs.open(it.id); if (r && r.ok === false) msg('no hay app para ese tipo de archivo'); } };
+  const open = async it => { if (it.type === 'dir') go(it.id); else { const r = await Mirage.fs.open(it.id); if (r && r.ok === false) msg('no app for that file type'); } };
 
   $('list').addEventListener('click', e => { const r = e.target.closest('.it'); sel = r ? r.dataset.id : null; render(); });
   $('list').addEventListener('dblclick', e => { const r = e.target.closest('.it'); if (r) open(items.find(i => i.id === r.dataset.id)); });
@@ -70,7 +70,7 @@
   $('up').onclick = () => go(upOf(cwd));
   $('open').onclick = () => open(items.find(i => i.id === sel));
 
-  /* Mini-diálogo en línea (los prompt() nativos romperían la estética) */
+  /* Inline mini-dialog (native prompt() would break the aesthetic) */
   function ask(label, def = '') {
     return new Promise(res => {
       $('ask').classList.add('on'); $('askin').placeholder = label; $('askin').value = def; $('askin').focus(); $('askin').select();
@@ -80,17 +80,17 @@
     });
   }
   const guard = f => async (...a) => { try { await f(...a); } catch (e) { msg(e.message); } };
-  $('nf').onclick = guard(async () => { const n = await ask('nombre de la carpeta'); if (n) await Mirage.fs.mkdir(join(cwd, n)); });
-  $('nt').onclick = guard(async () => { const n = await ask('nombre del archivo', 'nuevo.txt'); if (n) await Mirage.fs.write(join(cwd, n), ''); });
+  $('nf').onclick = guard(async () => { const n = await ask('folder name'); if (n) await Mirage.fs.mkdir(join(cwd, n)); });
+  $('nt').onclick = guard(async () => { const n = await ask('file name', 'new.txt'); if (n) await Mirage.fs.write(join(cwd, n), ''); });
   $('ren').onclick = guard(async () => {
-    const it = items.find(i => i.id === sel); const n = await ask('nuevo nombre', it.name);
+    const it = items.find(i => i.id === sel); const n = await ask('new name', it.name);
     if (n && n !== it.name) await Mirage.fs.move(it.id, join(cwd, n));
   });
   $('del').onclick = guard(async () => {
-    const it = items.find(i => i.id === sel); const n = await ask(`escribe "borrar" para eliminar ${it.name}`);
-    if (n === 'borrar') await Mirage.fs.remove(it.id, true);
+    const it = items.find(i => i.id === sel); const n = await ask(`type "delete" to remove ${it.name}`);
+    if (n === 'delete') await Mirage.fs.remove(it.id, true);
   });
-  $('inst').onclick = guard(async () => { const r = await Mirage.cell.install(sel); msg(`celda instalada: ${r.name}`); });
+  $('inst').onclick = guard(async () => { const r = await Mirage.cell.install(sel); msg(`cell installed: ${r.name}`); });
   $('up2').onclick = () => $('file').click();
   $('file').onchange = guard(async () => {
     for (const f of $('file').files) {
@@ -98,7 +98,7 @@
       if (/^text\/|json|javascript|xml/.test(f.type) || /\.(txt|md|js|json|html?|css|csv|log)$/i.test(f.name)) await Mirage.fs.write(path, await f.text());
       else await Mirage.fs.writeBinary(path, await f.arrayBuffer(), f.type || 'application/octet-stream');
     }
-    $('file').value = ''; msg('importado');
+    $('file').value = ''; msg('imported');
   });
 
   const refresh = ev => { const p = ev && (ev.path || ev.dst || ev.src); if (!p || p.startsWith(cwd + '/') || p === cwd) go(cwd); };

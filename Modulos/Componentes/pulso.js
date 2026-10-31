@@ -1,5 +1,5 @@
-/* Componente · PULSO — no es una barra de tareas: una línea mínima en el borde superior.
-   Lente, celda en foco, reloj, avisos y usuario. Todo texto, sin iconos. */
+/* Component · PULSE — not a taskbar: a minimal line on the top edge.
+   Lens, focused cell, clock, alerts and user. All text, no icons. */
 function registerComponent(Kernel) {
   const M = window.Mirage.init();
   const ui = M.ui.scope('pulso');
@@ -8,10 +8,11 @@ function registerComponent(Kernel) {
   const bar = document.createElement('div');
   bar.id = 'pulso';
   bar.innerHTML =
-    '<button data-p="lens" title="Cambiar de lente"><span class="p-lens"></span></button>' +
-    '<button data-p="wish" title="Deseo (Ctrl+Espacio)">Deseo</button>' +
+    '<button data-p="menu" title="Fold (Alt+M)">Mirage<b class="p-dev">dev</b></button>' +
+    '<button data-p="lens" title="Switch lens"><span class="p-lens"></span></button>' +
+    '<button data-p="wish" title="Wish (Ctrl+Space)">Wish</button>' +
     '<span class="p-focus"></span><span class="p-sp"></span>' +
-    '<button data-p="notes" title="Avisos">Avisos<b class="p-n" hidden></b></button>' +
+    '<button data-p="notes" title="Alerts">Alerts<b class="p-n" hidden></b></button>' +
     '<span class="p-clock"></span><button data-p="user"></button>';
   const tray = document.createElement('div');
   tray.id = 'p-tray'; tray.hidden = true;
@@ -21,15 +22,15 @@ function registerComponent(Kernel) {
   const q = s => bar.querySelector(s);
   const refreshFocus = () => { const c = M.cells.get(M.cells.focusedId); q('.p-focus').textContent = c ? c.title : ''; };
   const refreshLens = () => { const l = M.lens.current; q('.p-lens').textContent = l ? l.name : '—'; };
-  const tick = () => { q('.p-clock').textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); };
+  const tick = () => { q('.p-clock').textContent = new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }); };
   async function refreshCount() { const n = await Kernel.notifications.unreadCount(); const b = q('.p-n'); b.hidden = !n; b.textContent = n; }
   async function refreshUser() { const u = await Kernel.users.current(); q('[data-p=user]').textContent = u ? u.name : ''; }
 
   async function renderTray() {
     const items = await Kernel.notifications.list({ limit: 25 });
-    tray.innerHTML = '<div class="t-head"><span>Avisos</span><button data-p="readall">marcar leídos</button></div>' +
+    tray.innerHTML = '<div class="t-head"><span>Alerts</span><button data-p="readall">mark all read</button></div>' +
       (items.length ? items.map(n => `<div class="t-item${n.read ? '' : ' un'}"><div><div>${E(n.title)}</div><div class="t-b">${E(n.body)}</div></div><small>${M.util.ago(n.ts)}</small></div>`).join('')
-        : '<div class="t-empty">sin avisos</div>');
+        : '<div class="t-empty">no alerts</div>');
   }
   function toast(n) {
     const t = document.createElement('div');
@@ -45,6 +46,7 @@ function registerComponent(Kernel) {
     const a = b.dataset.p;
     if (a === 'lens') { const ls = M.lens.list(); const i = ls.findIndex(l => l.id === M.lens.current?.id); M.lens.use(ls[(i + 1) % ls.length].id); }
     else if (a === 'wish') M.bus.emit('key:wish', {});
+    else if (a === 'menu') M.bus.emit('key:menu', {});
     else if (a === 'notes') { tray.hidden = !tray.hidden; if (!tray.hidden) renderTray(); }
     else if (a === 'user') M.cells.open('config');
   });
@@ -62,7 +64,7 @@ function registerComponent(Kernel) {
 
   let clock;
   return {
-    id: 'ui.pulso', name: 'Componente · Pulso',
+    id: 'ui.pulso', name: 'Component · Pulse',
     start() {
       ui.style(`
         #pulso{position:absolute;left:0;right:0;top:0;height:30px;display:flex;align-items:center;gap:2px;padding:0 6px;

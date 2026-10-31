@@ -1,5 +1,5 @@
-/* API · fs — archivos de /device para las celdas. El Kernel ya enjaula todo a /device;
-   aquí solo se decide QUIÉN puede llamar (capacidades) y qué forma tienen las respuestas. */
+/* API · fs — /device files for cells. The Kernel already jails everything to /device;
+   here we only decide WHO may call (capabilities) and what shape the responses have. */
 function registerAPI(Kernel) {
   const M = window.Mirage.init();
   const fs = Kernel.fs;
@@ -33,5 +33,5 @@ function registerAPI(Kernel) {
   };
 
   let off;
-  return { id: 'api.fs', name: 'API · Archivos', start() { off = M.api.register('fs', methods, perms); }, stop() { off && off(); } };
+  return { id: 'api.fs', name: 'API · Files', start() { off = M.api.register('fs', methods, perms); }, stop() { off && off(); } };
 }

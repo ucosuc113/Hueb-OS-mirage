@@ -1,10 +1,10 @@
 <!doctype html>
-<html><head><meta charset="utf-8"><title>Constelación</title>
+<html><head><meta charset="utf-8"><title>Constellation</title>
 <script type="application/json" id="wos-manifest">
-{ "id": "constellation", "name": "Constelación", "version": "0.2.0",
+{ "id": "constellation", "name": "Constellation", "version": "0.2.0",
   "icon": "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><circle cx='6' cy='7' r='2'/><circle cx='18' cy='6' r='2'/><circle cx='12' cy='17' r='2'/><path d='M8 7.4l8-1M7 9l4 6M17 8l-4 7'/></svg>",
-  "category": "sistema", "description": "Los procesos del Kernel como mapa y los módulos que forman el shell",
-  "keywords": ["procesos", "tareas", "administrador", "task manager", "módulos", "kill"], "permissions": ["proc.kill", "system.config"],
+  "category": "system", "description": "Kernel processes as a map, and the modules that make up the shell",
+  "keywords": ["processes", "tasks", "manager", "task manager", "modules", "kill"], "permissions": ["proc.kill", "system.config"],
   "singleton": true, "winWidth": 640, "winHeight": 480 }
 </script>
 <style>
@@ -18,8 +18,8 @@
   .k{font:10px var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--ink2);min-width:11ch}
 </style></head>
 <body>
-  <div class="label">Procesos · árbol de hilos</div><div id="procs"></div>
-  <div class="label">Módulos del shell · procesos protegidos del Kernel</div><div id="mods"></div>
+  <div class="label">Processes · thread tree</div><div id="procs"></div>
+  <div class="label">Shell modules · protected Kernel processes</div><div id="mods"></div>
 <script>
   const $ = id => document.getElementById(id);
   const esc = s => String(s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
@@ -27,17 +27,17 @@
 
   function node(p, byId) {
     const kids = p.children.map(id => byId[id]).filter(Boolean);
-    return `<div class="p"><span class="pid">${p.pid}</span><span class="n">${esc(p.title)}${p.window ? '' : ' <span class="muted">· servicio</span>'}</span>
-      <span class="muted" style="font:11px var(--mono)">${age(p.spawnedAt)}</span>${p.protected ? '<span class="tag">protegido</span>' : `<button class="danger" data-kill="${p.pid}">Cerrar</button>`}</div>` +
+    return `<div class="p"><span class="pid">${p.pid}</span><span class="n">${esc(p.title)}${p.window ? '' : ' <span class="muted">· service</span>'}</span>
+      <span class="muted" style="font:11px var(--mono)">${age(p.spawnedAt)}</span>${p.protected ? '<span class="tag">protected</span>' : `<button class="danger" data-kill="${p.pid}">Close</button>`}</div>` +
       (kids.length ? `<div class="tree">${kids.map(k => node(k, byId)).join('')}</div>` : '');
   }
   async function render() {
     const procs = await Mirage.sys.procs();
     const byId = Object.fromEntries(procs.map(p => [p.pid, p]));
     const roots = procs.filter(p => p.parentPid === null && !p.protected);
-    $('procs').innerHTML = roots.length ? roots.map(p => node(p, byId)).join('') : '<div class="muted" style="padding:8px;font:12px var(--mono)">ninguna celda abierta</div>';
+    $('procs').innerHTML = roots.length ? roots.map(p => node(p, byId)).join('') : '<div class="muted" style="padding:8px;font:12px var(--mono)">no cell is open</div>';
     const mods = await Mirage.sys.modules();
-    $('mods').innerHTML = mods.map(m => `<div class="p"><span class="k">${m.kind}</span><span class="n">${esc(m.name || m.id)}</span><span class="pid">pid ${m.pid}</span><button data-restart="${esc(m.path)}">Reiniciar</button></div>`).join('');
+    $('mods').innerHTML = mods.map(m => `<div class="p"><span class="k">${m.kind}</span><span class="n">${esc(m.name || m.id)}</span><span class="pid">pid ${m.pid}</span><button data-restart="${esc(m.path)}">Restart</button></div>`).join('');
   }
   document.addEventListener('click', async e => {
     const k = e.target.closest('[data-kill]'), r = e.target.closest('[data-restart]');

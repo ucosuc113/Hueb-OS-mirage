@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="es">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -8,18 +8,18 @@
 </head>
 <body>
 <!-- MIRAGE · L0 · IGNITION
-     Este archivo ES el bootloader de Mirage: no depende de ningún repositorio raíz, de service
-     workers ni de un instalador. Solo necesita servir esta carpeta tal cual. Es la única página del
-     sistema (nunca navega); define las capas fijas y deja que ignition.js cargue el Kernel. -->
+     This file IS Mirage's bootloader: it does not depend on any root repository, service
+     workers or an installer. It only needs this folder to be served as is. It is the only page of the
+     system (it never navigates); it defines the fixed layers and lets ignition.js load the Kernel. -->
 <div id="mirage-root">
-  <div id="world"><div id="plane"></div></div>   <!-- lentes: celdas -->
-  <div id="chrome"></div>                          <!-- pulso, bolsillo -->
-  <div id="overlay"></div>                         <!-- deseo, pactos, avisos -->
+  <div id="world"><div id="plane"></div></div>   <!-- lenses: cells -->
+  <div id="chrome"></div>                          <!-- pulse, pocket -->
+  <div id="overlay"></div>                         <!-- wish, covenants, alerts -->
   <div id="splash">
     <div class="sp-name">Mirage</div>
     <div class="sp-bar"><i id="sp-fill"></i></div>
-    <div class="sp-step" id="sp-step">iniciando</div>
-    <div class="sp-hint">mantén Shift o F8 para modo seguro</div>
+    <div class="sp-step" id="sp-step">starting</div>
+    <div class="sp-hint">hold Shift or F8 for safe mode</div>
   </div>
 </div>
 <script src="mirage/substrate.js"></script>

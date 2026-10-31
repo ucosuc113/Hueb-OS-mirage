@@ -1,4 +1,4 @@
-/* API · sys / store / notify / chronicle — el resto de la superficie pública. */
+/* API · sys / store / notify / chronicle — the rest of the public surface. */
 function registerAPI(Kernel) {
   const M = window.Mirage.init();
   const offs = [];
@@ -14,7 +14,7 @@ function registerAPI(Kernel) {
     },
     procs: () => Kernel.procs.list().map(plainProc),
     async kill(ctx, pid) {
-      if (!(await Kernel.permissions.canKillProcess(pid))) throw new Error('ese proceso está protegido');
+      if (!(await Kernel.permissions.canKillProcess(pid))) throw new Error('that process is protected');
       return Kernel.procs.kill(pid);
     },
     modules: () => Kernel.modules.list(),
@@ -35,7 +35,7 @@ function registerAPI(Kernel) {
   };
   const sysPerms = { kill: 'proc.kill', restartModule: 'system.config', setMood: 'system.config', setLens: 'system.config', revoke: 'system.config', updateProfile: 'system.config' };
 
-  /* store: preferencias privadas de cada app (clave prefijada con su id) */
+  /* store: private preferences of each app (key prefixed with its id) */
   const k = (ctx, key) => `app.${ctx.appId}.${String(key).slice(0, 80)}`;
   const store = {
     get: (ctx, key, def = null) => Kernel.prefs.get(k(ctx, key), def),
@@ -59,7 +59,7 @@ function registerAPI(Kernel) {
   };
 
   return {
-    id: 'api.sys', name: 'API · Sistema',
+    id: 'api.sys', name: 'API · System',
     start() {
       offs.push(
         M.api.register('sys', sys, sysPerms),

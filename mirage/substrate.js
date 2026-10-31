@@ -1,9 +1,9 @@
 /* ═══════════════════════════════════════════════════════════════
    MIRAGE · L1 · SUBSTRATE
-   Runtime sin opiniones visuales. Define los 8 "órganos" sobre los que
-   se apoya todo lo demás: bus, svc, intents, api, caps, tokens, ui, lens
-   (+ catalog). No dibuja nada por sí mismo: eso es de las capas L3/L4.
-   Se carga ANTES que Kernel.js; solo toca window.Kernel dentro de init().
+   Runtime with no visual opinions. Defines the 8 "organs" everything else
+   rests on: bus, svc, intents, api, caps, tokens, ui, lens
+   (+ catalog). It draws nothing by itself: that belongs to layers L3/L4.
+   Loaded BEFORE Kernel.js; only touches window.Kernel inside init().
 ═══════════════════════════════════════════════════════════════ */
 ;(function (global) {
   'use strict';
@@ -20,12 +20,12 @@
     debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; },
     ago(ts) {
       const s = Math.max(0, (Date.now() - ts) / 1000 | 0);
-      if (s < 45) return 'ahora';
+      if (s < 45) return 'now';
       if (s < 3600) return Math.round(s / 60) + ' min';
       if (s < 86400) return Math.round(s / 3600) + ' h';
       return Math.round(s / 86400) + ' d';
     },
-    /* Puntuación difusa 0..1 de q dentro de t */
+    /* Fuzzy score 0..1 of q inside t */
     score(q, t) {
       q = String(q || '').toLowerCase().trim(); t = String(t || '').toLowerCase();
       if (!q) return 0.1;
@@ -68,9 +68,9 @@
     'modules:started', 'modules:stopped',
   ];
 
-  /* ── 2. svc: localizador de servicios con espera ──
-     Los módulos del Kernel se cargan en orden arbitrario; nadie asume que otro
-     ya arrancó: se pide con `await Mirage.svc.need('nombre')`. */
+  /* ── 2. svc: service locator with waiting ──
+     Kernel modules load in arbitrary order; nobody assumes another one
+     has already started: ask with `await Mirage.svc.need('name')`. */
   const svcs = new Map(), waiters = new Map();
   M.svc = {
     provide(name, impl) {
@@ -85,14 +85,14 @@
     need(name, ms = 8000) {
       if (svcs.has(name)) return Promise.resolve(svcs.get(name));
       return new Promise((res, rej) => {
-        const w = { res, t: setTimeout(() => rej(new Error(`svc.need('${name}'): no apareció en ${ms}ms`)), ms) };
+        const w = { res, t: setTimeout(() => rej(new Error(`svc.need('${name}'): did not show up within ${ms}ms`)), ms) };
         if (!waiters.has(name)) waiters.set(name, []);
         waiters.get(name).push(w);
       });
     },
   };
 
-  /* ── 3. intents: lo que el usuario "desea". Cualquiera puede proveer resultados. ──
+  /* ── 3. intents: what the user "wishes". Anyone can provide results. ──
      provider(query) → [{ title, hint?, icon?, score?, group?, run() }] */
   const providers = new Map();
   M.intents = {
@@ -108,7 +108,7 @@
     async run(result) { if (typeof result?.run === 'function') return result.run(); },
   };
 
-  /* ── 4. api: superficie pública para las celdas. Todo pasa por caps ── */
+  /* ── 4. api: public surface for cells. Everything goes through caps ── */
   const apis = new Map();
   M.api = {
     register(ns, methods, perms = {}) { apis.set(ns, { methods, perms }); return () => { if (apis.get(ns)?.methods === methods) apis.delete(ns); }; },
@@ -116,23 +116,23 @@
     async call(ctx, method, params = []) {
       const [ns, fn] = String(method).split('.');
       const a = apis.get(ns);
-      if (!a || !fn || fn.startsWith('_') || typeof a.methods[fn] !== 'function') throw new Error(`API no disponible: ${method}`);
+      if (!a || !fn || fn.startsWith('_') || typeof a.methods[fn] !== 'function') throw new Error(`API not available: ${method}`);
       const perm = a.perms[fn];
       if (perm) await M.caps.require(ctx.cell, perm);
       return a.methods[fn](ctx, ...params);
     },
   };
 
-  /* ── 5. caps: capacidades. Rol del usuario ∩ pacto de la celda ── */
+  /* ── 5. caps: capabilities. User role ∩ the cell's covenant ── */
   M.caps = {
     DESC: {
-      'fs.read'            : 'leer tus archivos',
-      'fs.write'           : 'crear y modificar archivos',
-      'fs.delete'          : 'borrar archivos',
-      'notifications.send' : 'enviarte avisos',
-      'proc.kill'          : 'cerrar procesos',
-      'system.config'      : 'cambiar la configuración del sistema',
-      'app.install'        : 'instalar celdas',
+      'fs.read'            : 'read your files',
+      'fs.write'           : 'create and modify files',
+      'fs.delete'          : 'delete files',
+      'notifications.send' : 'send you alerts',
+      'proc.kill'          : 'close processes',
+      'system.config'      : 'change the system settings',
+      'app.install'        : 'install cells',
     },
     async has(cell, perm) {
       if (!(await K.permissions.currentUserHas(perm))) return false;
@@ -140,21 +140,21 @@
     },
     async require(cell, perm) {
       if (await this.has(cell, perm)) return true;
-      // El rol del usuario no lo permite: no hay pacto que lo arregle
-      if (!(await K.permissions.currentUserHas(perm))) throw new Error(`Permiso denegado (rol): ${perm}`);
+      // The user's role does not allow it: no covenant can fix that
+      if (!(await K.permissions.currentUserHas(perm))) throw new Error(`Permission denied (role): ${perm}`);
       const pact = await M.svc.need('covenant', 1500).catch(() => null);
       const verdict = pact ? await pact.ask(cell, perm) : 'deny';
       if (verdict === 'always') { await K.permissions.grantAppPermission(cell.appId, perm); return true; }
       if (verdict === 'once') return true;
       await K.permissions.requestAppPermission(cell.appId, perm);
-      throw new Error(`Permiso denegado: ${perm}`);
+      throw new Error(`Permission denied: ${perm}`);
     },
   };
 
-  /* ── 6. tokens: variables de diseño vivas (las escribe el servicio "mood") ── */
+  /* ── 6. tokens: live design variables (written by the "mood" service) ── */
   M.tokens = {
     vars: {}, css: '', base: {},
-    /* `bw` (borde) = 2 píxeles REALES del monitor: 2 / devicePixelRatio píxeles CSS. */
+    /* `bw` (border) = 2 REAL monitor pixels: 2 / devicePixelRatio CSS pixels. */
     set(vars) {
       this.base = vars;
       this.vars = {
@@ -167,13 +167,13 @@
       M.bus.emit('tokens', { css: this.css });
     },
   };
-  /* Si el usuario cambia el zoom del navegador cambia el DPR: los bordes se recalculan */
+  /* If the user changes the browser zoom the DPR changes: borders are recalculated */
   let lastDpr = global.devicePixelRatio;
   global.addEventListener('resize', () => { if (global.devicePixelRatio !== lastDpr) { lastDpr = global.devicePixelRatio; M.tokens.set(M.tokens.base); } });
 
-  /* ── 7. ui: capas fijas + ámbito con limpieza automática ──
-     Los módulos de UI se montan en #world / #chrome / #overlay y, al detenerse
-     (Kernel.modules.stop/restart), dispose() deja el DOM exactamente como estaba. */
+  /* ── 7. ui: fixed layers + scope with automatic cleanup ──
+     UI modules mount on #world / #chrome / #overlay and, when stopped
+     (Kernel.modules.stop/restart), dispose() leaves the DOM exactly as it was. */
   M.ui = {
     layer: name => document.getElementById(name),
     scope(owner) {
@@ -191,9 +191,9 @@
     },
   };
 
-  /* ── 8. lens: la forma en que las celdas se disponen en el mundo ──
-     Una lente NO crea ni mueve iframes (moverlos los recargaría): solo
-     decide la geometría. Contrato: { id, name, icon, enter(), leave(),
+  /* ── 8. lens: the way cells are laid out in the world ──
+     A lens does NOT create or move iframes (moving them would reload them): it only
+     decides geometry. Contract: { id, name, icon, enter(), leave(),
      place(cell), suggest?(cell,parent), fit?(id), overview?() } */
   M.lens = {
     _all: new Map(), current: null,
@@ -202,13 +202,13 @@
       this._all.set(l.id, l);
       M.bus.emit('lens:registered', { id: l.id });
       if (prev && prev.id === l.id) { try { prev.leave?.(); } catch { } this.current = null; this.use(l.id, { force: true }); }
-      else if (this._want === l.id) { this._want = null; this.use(l.id); }     // volvió la lente que se estaba reiniciando
+      else if (this._want === l.id) { this._want = null; this.use(l.id); }     // the lens that was restarting is back
       return () => {
         if (this._all.get(l.id) !== l) return;
         const wasCurrent = this.current === l;
         if (wasCurrent) { try { l.leave?.(); } catch { } this.current = null; this._want = l.id; }
         this._all.delete(l.id);
-        /* Si la lente no vuelve (módulo detenido de verdad), se cae a otra pasado un momento */
+        /* If the lens does not come back (module really stopped), fall back to another after a moment */
         if (wasCurrent) setTimeout(() => {
           if (this.current || !M.kernel?.bootComplete) return;
           const next = [...this._all.keys()][0];
@@ -220,7 +220,7 @@
     list: () => [...M.lens._all.values()].map(l => ({ id: l.id, name: l.name, icon: l.icon })),
     async use(id, { force } = {}) {
       const l = this._all.get(id);
-      if (!l) throw new Error(`lens.use: '${id}' no existe`);
+      if (!l) throw new Error(`lens.use: '${id}' does not exist`);
       if (this.current === l && !force) return l;
       try { this.current?.leave?.(); } catch (e) { console.error(e); }
       this.current = l;
@@ -238,13 +238,13 @@
     },
   };
 
-  /* ── catalog: apps del Kernel + lo que su manifiesto dice de más ──
-     El Kernel solo conserva unos pocos campos del manifiesto; aquí se lee
-     el HTML completo para conocer `intents`, `permissions`, etc. */
+  /* ── catalog: Kernel apps + whatever else their manifest says ──
+     The Kernel only keeps a few manifest fields; here the full
+     HTML is read to learn `intents`, `permissions`, etc. */
   async function loadAppHtml(app) {
     if (String(app.entry).startsWith('fs:')) return K.fs.read(app.entry.slice(3));
     const r = await fetch(app.entry, { cache: 'no-store' });
-    if (!r.ok) throw new Error(`no se pudo leer ${app.entry}`);
+    if (!r.ok) throw new Error(`could not read ${app.entry}`);
     return r.text();
   }
   M.loadAppHtml = loadAppHtml;
@@ -252,9 +252,9 @@
   const USER_APPS_DIR = '/device/apps';
   async function registerFromHtml(html, entry, sourceFile) {
     const mf = U.parseManifest(html);
-    if (!mf || !mf.id) throw new Error('el archivo no trae un manifiesto wos-manifest con id');
+    if (!mf || !mf.id) throw new Error('the file has no wos-manifest manifest with an id');
     const existing = await K.apps.get(mf.id);
-    if (existing?.meta?.systemApp) throw new Error(`'${mf.id}' es una app del sistema y no se puede reemplazar`);
+    if (existing?.meta?.systemApp) throw new Error(`'${mf.id}' is a system app and cannot be replaced`);
     await K.apps.register({
       id: mf.id, name: mf.name || mf.id, version: mf.version || '0.1.0', icon: mf.icon || '▪',
       category: mf.category || 'utility', singleton: !!mf.singleton, entry,
@@ -270,7 +270,7 @@
     apps: new Map(),
     get: id => M.catalog.apps.get(id),
     list: () => [...M.catalog.apps.values()],
-    /* Una celda de usuario es un .html con manifiesto dentro de /device/apps */
+    /* A user cell is an .html with a manifest inside /device/apps */
     async install(path) {
       const html = await K.fs.read(path);
       const target = `${USER_APPS_DIR}/${K.fs.basename(path)}`;
@@ -303,7 +303,7 @@
     },
   };
 
-  /* ── varios ── */
+  /* ── misc ── */
   M.notify = (title, body = '', icon = '') =>
     K.notifications.push({ title, body, icon, category: 'mirage' }).catch(() => { });
 
@@ -322,12 +322,12 @@
     resolveReady(ev);
   }
 
-  /* init() es idempotente: lo llama Ignition y también cada módulo al arrancar,
-     así el orden de carga entre scripts, Kernel y módulos deja de importar. */
+  /* init() is idempotent: Ignition calls it and so does every module on startup,
+     so the load order between scripts, Kernel and modules stops mattering. */
   M.init = function () {
     if (K) return M;
     K = M.kernel = global.Kernel;
-    if (!K) throw new Error('Mirage.init: Kernel.js no está cargado');
+    if (!K) throw new Error('Mirage.init: Kernel.js is not loaded');
     for (const t of KERNEL_TOPICS) K.on(t, d => M.bus.emit('k:' + t, d));
     M.cells._start(K);
     K.on('ready', onKernelReady);

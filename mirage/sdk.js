@@ -1,7 +1,7 @@
-/* MIRAGE SDK — se inyecta inline dentro de cada celda (srcdoc). Nunca escribir aquí la etiqueta de cierre de script. */
+/* MIRAGE SDK — injected inline into every cell (srcdoc). Never write the closing script tag here. */
 (function () {
   if (window.Mirage) return;
-  var HOST = window.parent;   // capturado ya: una app puede declarar su propio "parent" global y taparlo
+  var HOST = window.parent;   // captured now: an app may declare its own global "parent" and shadow it
   var pending = {}, seq = 0, handlers = {}, info = null, readyRes;
   var ready = new Promise(function (r) { readyRes = r; });
 
@@ -54,9 +54,10 @@
     if (typeof k === 'string' && k !== 'then') return ns(k);
   } });
 
-  /* Atajo global del Deseo aunque el foco esté dentro de la celda */
+  /* Global Wish / Fold shortcuts even when focus is inside the cell */
   window.addEventListener('keydown', function (e) {
     if ((e.ctrlKey || e.altKey) && e.code === 'Space') { e.preventDefault(); post({ t: 'key', key: 'wish' }); }
+    if (e.altKey && e.code === 'KeyM') { e.preventDefault(); post({ t: 'key', key: 'menu' }); }
   });
 
   function hi() { post({ t: 'ready' }); }

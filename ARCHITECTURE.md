@@ -1,133 +1,143 @@
-# Hueb-OS Mirage — arquitectura
+# Hueb-OS Mirage — architecture
 
-> El Kernel (`Kernel.js`) **no se toca nunca**. Todo lo de aquí se apoya en lo que el Kernel ya expone.
+> The Kernel (`Kernel.js`) **is never touched**. Everything here builds on what the Kernel already exposes.
 >
-> **Mirage es autónomo.** Comparte con el entorno Hueb-OS únicamente `Kernel.js`. Tiene su propio bootloader
-> (L0, `index.html` + `ignition.js`) y su propio shell. No usa el `index.html` raíz del repo, ni `sw.js`, ni el
-> instalador, ni la estructura `/system/OS/<repo>`: basta con servir esta carpeta tal cual (GitHub Pages, cualquier
-> servidor estático). **Aviso:** el Kernel fija el nombre de la base IndexedDB (`HuebOS`); dos sistemas en el *mismo
-> origen* compartirían datos. Sírvelo desde un dominio/origen propio.
+> **Mirage is self-contained.** It shares only `Kernel.js` with the Hueb-OS environment. It has its own bootloader
+> (L0, `index.html` + `ignition.js`) and its own shell. It does not use the repo's root `index.html`, nor `sw.js`, nor the
+> installer, nor the `/system/OS/<repo>` structure: just serve this folder as is (GitHub Pages, any static
+> server). **Warning:** the Kernel fixes the name of the IndexedDB database (`HuebOS`); two systems on the *same
+> origin* would share data. Serve it from its own domain/origin.
 
-## Por qué no "bootloader + shell"
+## Why not "bootloader + shell"
 
-Dos capas obligan a que el shell sea un bloque monolítico: si falla, falla todo; si quieres cambiar
-cómo se ven las ventanas, reescribes el shell. Mirage separa **qué hace el sistema** de **cómo se ve**
-en capas con contratos pequeños, y construye el shell *con las herramientas del propio Kernel*
-(módulos, procesos, permisos) en vez de al lado de ellas.
+Two layers force the shell to be a monolithic block: if it fails, everything fails; if you want to change
+how windows look, you rewrite the shell. Mirage separates **what the system does** from **how it looks**
+in layers with small contracts, and builds the shell *with the Kernel's own tools*
+(modules, processes, permissions) instead of next to them.
 
 ```
- Kernel.js                intocable (lo único compartido con Hueb-OS): FS, Procs, Apps, Prefs, Permisos, Módulos, Notificaciones…
+ Kernel.js                untouchable (the only thing shared with Hueb-OS): FS, Procs, Apps, Prefs, Permissions, Modules, Notifications…
  ─────────────────────────────────────────────────────────────────────────────
- L0  IGNITION     index.html + mirage/ignition.js   BOOTLOADER propio: carga Kernel.js, modo seguro, rescate
- L1  SUBSTRATE    mirage/substrate.js               8 órganos headless (sin pintar nada)
- L2  CELL HOST    mirage/cells.js                   celda = proceso + iframe + tarjeta + IPC
- L3  MÓDULOS      Modulos/{Servicios,API,Componentes}   lo que el Kernel carga y gestiona
- L4  CELDAS       apps/*.html                       aplicaciones aisladas que hablan por SDK
+ L0  IGNITION     index.html + mirage/ignition.js   own BOOTLOADER: loads Kernel.js, safe mode, rescue
+ L1  SUBSTRATE    mirage/substrate.js               8 headless organs (draw nothing)
+ L2  CELL HOST    mirage/cells.js                   cell = process + iframe + card + IPC
+ L3  MODULES      Modulos/{Servicios,API,Componentes}   what the Kernel loads and manages
+ L4  CELLS        apps/*.html                       isolated applications that talk through the SDK
 ```
 
-### Los 8 órganos del Substrate
+### The Substrate's 8 organs
 
-| órgano | para qué | quién lo usa |
+| organ | what for | who uses it |
 |---|---|---|
-| `Mirage.bus` | pub/sub propio. Eventos del Kernel entran como `k:<evento>` | todos |
-| `Mirage.svc` | localizador con espera: `await svc.need('mood')`. El orden de carga deja de importar | módulos |
-| `Mirage.intents` | proveedores de *deseos*: apps, archivos, verbos, cálculo… | Deseo |
-| `Mirage.api` | namespaces públicos (`fs.read`, `cell.open`…) con permiso por método | celdas |
-| `Mirage.caps` | rol del usuario ∩ pacto de la celda; pide el pacto al componente `covenant` | api |
-| `Mirage.tokens` | variables de diseño vivas, empujadas a shell y celdas | mood |
-| `Mirage.ui` | capas fijas y `scope(owner)` con `dispose()` — un módulo se desmonta sin dejar rastro | componentes |
-| `Mirage.lens` | **cómo se disponen las celdas.** Una lente solo decide geometría | mesa, mosaico |
+| `Mirage.bus` | own pub/sub. Kernel events come in as `k:<event>` | everyone |
+| `Mirage.svc` | locator with waiting: `await svc.need('mood')`. Load order stops mattering | modules |
+| `Mirage.intents` | providers of *wishes*: apps, files, verbs, math… | Wish |
+| `Mirage.api` | public namespaces (`fs.read`, `cell.open`…) with per-method permission | cells |
+| `Mirage.caps` | user role ∩ the cell's covenant; asks the `covenant` component for the covenant | api |
+| `Mirage.tokens` | live design variables, pushed to the shell and cells | mood |
+| `Mirage.ui` | fixed layers and `scope(owner)` with `dispose()` — a module unmounts without a trace | components |
+| `Mirage.lens` | **how cells are laid out.** A lens only decides geometry | table, mosaic |
 
-Más `Mirage.catalog` (apps del Kernel + lo que su manifiesto dice de más) y `Mirage.cells` (L2).
+Plus `Mirage.catalog` (Kernel apps + whatever their manifest says) and `Mirage.cells` (L2).
 
-## Arranque
+## Startup
 
-1. `index.html` carga `substrate.js`, `cells.js` e `ignition.js`. Ignition abre una ventana de 700 ms (Shift o F8 =
-   modo seguro), **carga `Kernel.js` él mismo** (si falta, muestra un fallo con reintento), y llama a `Mirage.init()`
-   (idempotente: también lo llama cada módulo).
-2. El Kernel arranca solo (DB → FS → prefs → apps desde `apps/index.json` → módulos).
-3. Sus `ModuleLoader` sincronizan `Modulos/<Tipo>/index.json` y ejecutan cada archivo:
-   `registerService` → `registerAPI` → `registerComponent`. Cada módulo es un **proceso protegido**
-   en `Kernel.procs`, y se puede parar/reiniciar en caliente (`Kernel.modules.restart(path)`),
-   incluso la lente activa — la interfaz entera se recarga sin tocar celdas ni Kernel.
-4. Evento `ready` del Kernel → catálogo, lente guardada, restauración de la sesión (`mirage.session`).
-5. Sin ninguna lente (Modo Seguro o módulos rotos) Ignition ofrece su **consola de rescate**, que no depende
-   de ningún módulo y puede relanzar `Kernel.modules.bootAll()`.
+1. `index.html` loads `substrate.js`, `cells.js` and `ignition.js`. Ignition opens a 700 ms window (Shift or F8 =
+   safe mode), **loads `Kernel.js` itself** (if missing, it shows a failure with retry), and calls `Mirage.init()`
+   (idempotent: every module calls it too).
+2. The Kernel starts on its own (DB → FS → prefs → apps from `apps/index.json` → modules).
+3. Its `ModuleLoader`s sync `Modulos/<Type>/index.json` and run each file:
+   `registerService` → `registerAPI` → `registerComponent`. Each module is a **protected process**
+   in `Kernel.procs`, and can be stopped/restarted hot (`Kernel.modules.restart(path)`),
+   even the active lens — the whole interface reloads without touching cells or the Kernel.
+4. Kernel `ready` event → catalog, saved lens, session restore (`mirage.session`).
+5. With no lens at all (Safe Mode or broken modules) Ignition offers its **rescue console**, which depends on
+   no module and can relaunch `Kernel.modules.bootAll()`.
 
-## Qué es distinto del escritorio de siempre
+## What is different from the usual desktop
 
-- **Mesa, no escritorio.** Un plano infinito sin ventanas ni barra de tareas. Arrastrar el fondo, rueda para zoom,
-  y **zoom semántico**: lejos, cada celda colapsa a una burbuja. `Esc` ve todo, `⤢` entra en una celda.
-- **Hilos.** Una celda abierta desde otra queda unida a ella por una línea (es el árbol de `Procs` del Kernel).
-  Cerrar la madre cierra a las hijas, porque matar el proceso mata a sus hijos.
-- **Deseo, no menú inicio.** `Ctrl+Espacio` (o escribir cualquier letra) abre una barra única: apps, archivos,
-  `nota …`, `2+2`, `lente mosaico`, `ánimo ocaso`, `instalar /ruta.html`, `ver todo`, `recargar interfaz`.
-  Cualquier módulo suma proveedores con `Mirage.intents.provide`.
-- **Lentes intercambiables.** `Mesa` y `Mosaico` (rejilla) muestran las mismas celdas **sin recargar ni un iframe**
-  (mover un iframe en el DOM lo reiniciaría; por eso las lentes solo tocan geometría).
-- **Bolsillo, no minimizar.** Una celda guardada sigue viva; solo deja de estorbar.
-- **Crónica.** El tiempo como eje: diario de lo que ocurre + versiones recientes de archivos de texto con *restaurar*
-  (también de archivos ya borrados).
-- **Ánimo.** Escala de grises: Noche, Día, Grafito, Papel; en *auto* sigue la hora (día 7–19 h).
-- **Pactos.** Las celdas de terceros piden cada permiso con una tarjeta; "siempre / solo esta vez / negar".
-  Esto cierra el hueco del Kernel donde nadie concedía permisos a las apps.
-- **Celdas de usuario.** Cualquier `.html` con manifiesto `wos-manifest` en `/device/apps` es una app
-  (`instalar <ruta>` o el botón en Archivos). El Kernel olvida el registro en cada arranque; Mirage lo reconstruye.
+- **Table, not desktop.** An infinite plane with no windows or taskbar. Drag the background, wheel to zoom,
+  and **semantic zoom**: far away, each cell collapses into a bubble. `Esc` sees everything, `⤢` enters a cell.
+  The zoom snaps to a crisp 1:1 near 100 %.
+- **Threads.** A cell opened from another stays joined to it by a line (it is the Kernel's `Procs` tree).
+  Closing the parent closes the children, because killing the process kills its children.
+- **Wish, and also a start menu.** `Ctrl+Space` (or typing any letter) opens a single bar: apps, files,
+  `note …`, `2+2`, `lens mosaic`, `mood paper`, `install /path.html`, `see all`, `reload interface`, `lock`.
+  Any module adds providers with `Mirage.intents.provide`.
+- **Fold.** The start menu, as a sheet folded in three (`Alt+M` or the MIRAGE button in the Pulse): system status
+  and actions (lock, reload, reboot, repair), a keyboard-driven cell index, and lens/mood switches.
+- **Lock.** A lock screen (`lock` in the Wish, or `L` in the Fold) with a big clock and, if the user has a password,
+  a field to get back in. It is a courtesy lock, not real security.
+- **Motion.** Cells are born as a dot that stretches into a line and opens into a sheet; closing plays it in reverse.
+  Switchable and adjustable in Settings.
+- **Interchangeable lenses.** `Table` and `Mosaic` (grid) show the same cells **without reloading a single iframe**
+  (moving an iframe in the DOM would restart it; that is why lenses only touch geometry).
+- **Pocket, not minimize.** A stowed cell stays alive; it just stops getting in the way.
+- **Chronicle.** Time as the axis: a diary of what happens + recent versions of text files with *restore*
+  (also for already deleted files).
+- **Mood.** Grayscale scale: Night, Day, Graphite, Paper; in *auto* it follows the clock (day 7–19 h).
+- **Covenants.** Third-party cells ask for each permission with a card; "always / just now / deny".
+  This closes the Kernel gap where nobody granted permissions to apps.
+- **User cells.** Any `.html` with a `wos-manifest` manifest in `/device/apps` is an app
+  (`install <path>` or the button in Files). The Kernel forgets the registry on every boot; Mirage rebuilds it.
 
-## Lenguaje visual
+## Visual language
 
-Plano, blanco y negro, minimalista: **sin degradados, sin sombras, sin esquinas redondeadas, sin emojis**. Colores
-sólidos; la jerarquía se hace con opacidad (`--ink`, `--ink2` = 55 %, `--line` = 20 %, `--edge` = 40 %). Los iconos
-son trazo lineal SVG que hereda el color (`currentColor`); un emoji de una celda de terceros se pasa a gris por CSS.
-**Todo borde mide 2 píxeles reales del monitor**: `--bw` = 2 / `devicePixelRatio` (se recalcula si cambia el zoom del
-navegador). Dentro de la Mesa el plano se escala, por eso el marco de la celda usa `--bw / --k` y los hilos usan
-`vector-effect: non-scaling-stroke`: siguen midiendo 2 px a cualquier zoom. (El contenido interno de una celda sí
-escala con el zoom, como una imagen.)
+Flat, black and white, minimalist: **no gradients, no shadows, no rounded corners, no emoji**. Solid colors;
+hierarchy is made with opacity (`--ink`, `--ink2` = 55 %, `--line` = 20 %, `--edge` = 40 %). Icons are
+linear SVG stroke that inherits the color (`currentColor`); an emoji from a third-party cell is turned gray by CSS.
+**Every border measures 2 real monitor pixels**: `--bw` = 2 / `devicePixelRatio` (recalculated if the browser zoom
+changes). Inside the Table the plane is scaled, so the cell frame uses `--bw / --k` and threads use
+`vector-effect: non-scaling-stroke`: they keep measuring 2 px at any zoom. (A cell's inner content does
+scale with the zoom, like an image.) To keep that content sharp, the plane only holds its own GPU layer while
+moving; once it stops, the layer is released and the browser re-rasterizes at the real scale.
 
-## Seguridad (alineada con la frontera `/device`)
+## Security (aligned with the `/device` boundary)
 
-- `Kernel.fs` ya enjaula todo a `/device`; Mirage no abre otra vía (nunca usa `DB` crudo).
-- Celdas de sistema (`meta.systemApp`): iframe `srcdoc` con `allow-same-origin`. Celdas de terceros:
-  **origen opaco**, solo pueden usar el SDK/IPC. Verificado: `frame.contentDocument` es inaccesible desde el shell.
-- Toda llamada pasa por `Mirage.caps`: el rol del usuario manda; encima, el pacto de la celda.
-- El IPC solo atiende a ventanas que el shell abrió (`cellBySource`).
+- `Kernel.fs` already jails everything to `/device`; Mirage opens no other path (it never uses raw `DB`).
+- System cells (`meta.systemApp`): `srcdoc` iframe with `allow-same-origin`. Third-party cells:
+  **opaque origin**, they can only use the SDK/IPC. Verified: `frame.contentDocument` is inaccessible from the shell.
+- Every call goes through `Mirage.caps`: the user's role rules; on top of it, the cell's covenant.
+- The IPC only serves windows the shell opened (`cellBySource`).
 
-## Contratos para extender
+## Contracts for extending
 
-**Servicio / API / Componente** — un archivo en `Modulos/<Tipo>/` + su nombre en `index.json`:
+**Service / API / Component** — a file in `Modulos/<Type>/` + its name in `index.json`:
 
 ```js
-function registerComponent(Kernel) {          // registerService / registerAPI igual
+function registerComponent(Kernel) {          // registerService / registerAPI work the same
   const M = window.Mirage.init();
-  const ui = M.ui.scope('mi-cosa');
-  return { id: 'ui.mi-cosa', name: 'Mi cosa',
+  const ui = M.ui.scope('my-thing');
+  return { id: 'ui.my-thing', name: 'My thing',
     start() { ui.style('…'); ui.mount('chrome', el); },
-    stop()  { ui.dispose(); } };                // deja el DOM limpio
+    stop()  { ui.dispose(); } };                // leaves the DOM clean
 }
 ```
 
-**Lente** — `M.lens.register({ id, name, icon, enter(), leave(), place(cell), suggest?(cell,parent), fit?(id), overview?() })`.
-Las celdas son `M.cells.get(id)` (`.rect`, `.el`, `.state`, `.parent`); cambia `.rect` y llama `M.cells.touch(id)`.
+**Lens** — `M.lens.register({ id, name, icon, enter(), leave(), place(cell), suggest?(cell,parent), fit?(id), overview?() })`.
+Cells are `M.cells.get(id)` (`.rect`, `.el`, `.state`, `.parent`); change `.rect` and call `M.cells.touch(id)`.
 
-**Celda** — un `.html` con:
+**Cell** — an `.html` with:
 
 ```html
-<script type="application/json" id="wos-manifest">{ "id":"mi-app", "name":"Mi app", "icon":"🧪",
+<script type="application/json" id="wos-manifest">{ "id":"my-app", "name":"My app", "icon":"🧪",
   "keywords":["…"], "permissions":["fs.read"], "winWidth":600, "winHeight":420 }</script>
 <script>
   Mirage.ready.then(info => { /* info.args, info.trusted */ });
-  const txt = await Mirage.fs.read('/device/docs/a.txt');   // cualquier namespace de Mirage.api
-  Mirage.on('k:fs:write', e => {});                          // eventos del Kernel / Mirage
+  const txt = await Mirage.fs.read('/device/docs/a.txt');   // any Mirage.api namespace
+  Mirage.on('k:fs:write', e => {});                          // Kernel / Mirage events
 </script>
 ```
 
-El SDK, los tokens (`var(--ink)`, `--accent`, `--panel`…) y un kit CSS mínimo se inyectan solos.
-**No declares globales llamados `parent`, `top` o `Mirage`**: el SDK ya está protegido contra `parent`, pero es mala idea.
+The SDK, the tokens (`var(--ink)`, `--accent`, `--panel`…) and a minimal CSS kit are injected automatically.
+**Do not declare globals named `parent`, `top` or `Mirage`**: the SDK is already protected against `parent`, but it is a bad idea.
 
-## Limitaciones conocidas / pendientes
+## Known limitations / pending
 
-- Verificado con servidor estático local (Chrome real y el navegador integrado). Sin Service Worker ni bootloader
-  externo; falta probarlo en GitHub Pages con su ruta base.
-- Los iframes `srcdoc` heredan el CSP de la página: `index.html` no define ninguno; si añades uno, permite scripts inline.
-- Faltan: arrastrar archivos entre celdas, atajos dentro de celdas más allá del Deseo, empaquetado `.hpkg`
-  (Mirage usa `.html` con manifiesto).
+- Verified with a local static server (real Chrome and the built-in browser). No Service Worker or external bootloader;
+  still to be tested on GitHub Pages with its base path.
+- `srcdoc` iframes inherit the page's CSP: `index.html` defines none; if you add one, allow inline scripts.
+- Missing: dragging files between cells, shortcuts inside cells beyond the Wish and the Fold, `.hpkg` packaging
+  (Mirage uses `.html` with a manifest).
+- File names (`pliego.js`, `candado.js`, `movimiento.js`, `mesa.js`…) and internal ids (`ui.pliego`, lens id `mesa`)
+  keep their original Spanish names; only what the user sees was translated.

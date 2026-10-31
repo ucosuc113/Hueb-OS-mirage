@@ -1,5 +1,5 @@
-/* Componente · BOLSILLO — donde se guardan las celdas en vez de "minimizarlas".
-   Una celda guardada sigue viva (su proceso y su iframe no se tocan): solo deja de estorbar. */
+/* Component · POCKET — where cells are stored instead of being "minimized".
+   A stowed cell stays alive (its process and iframe are untouched): it just stops getting in the way. */
 function registerComponent(Kernel) {
   const M = window.Mirage.init();
   const ui = M.ui.scope('bolsillo');
@@ -10,7 +10,7 @@ function registerComponent(Kernel) {
     const stowed = M.cells.list().filter(c => c.state === 'stowed');
     dock.hidden = !stowed.length;
     dock.innerHTML = stowed.map(c =>
-      `<button class="b-chip" data-id="${c.id}" title="Sacar del bolsillo"><i>${Kernel.icons.render(c.icon)}</i><span>${M.util.esc(c.title)}</span></button>`).join('');
+      `<button class="b-chip" data-id="${c.id}" title="Take out of the pocket"><i>${Kernel.icons.render(c.icon)}</i><span>${M.util.esc(c.title)}</span></button>`).join('');
   }
   ui.on(dock, 'click', e => {
     const b = e.target.closest('.b-chip'); if (!b) return;
@@ -19,7 +19,7 @@ function registerComponent(Kernel) {
   for (const t of ['cell:added', 'cell:changed', 'cell:removed', 'ready']) ui.defer(M.bus.on(t, render));
 
   return {
-    id: 'ui.bolsillo', name: 'Componente · Bolsillo',
+    id: 'ui.bolsillo', name: 'Component · Pocket',
     start() {
       ui.style(`
         #bolsillo{position:absolute;left:0;bottom:0;display:flex;max-width:100vw;overflow-x:auto;background:var(--bg);border-top:var(--bw) solid var(--line);border-right:var(--bw) solid var(--line)}

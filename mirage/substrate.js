@@ -1,10 +1,3 @@
-/* ═══════════════════════════════════════════════════════════════
-   MIRAGE · L1 · SUBSTRATE
-   Runtime with no visual opinions. Defines the 8 "organs" everything else
-   rests on: bus, svc, intents, api, caps, tokens, ui, lens
-   (+ catalog). It draws nothing by itself: that belongs to layers L3/L4.
-   Loaded BEFORE Kernel.js; only touches window.Kernel inside init().
-═══════════════════════════════════════════════════════════════ */
 ;(function (global) {
   'use strict';
   const M = global.Mirage = global.Mirage || {};
@@ -92,18 +85,17 @@
     },
   };
 
-  /* ── 3. intents: what the user "wishes". Anyone can provide results. ──
-     provider(query) → [{ title, hint?, icon?, score?, group?, run() }] */
   const providers = new Map();
   M.intents = {
     provide(id, fn) { providers.set(id, fn); return () => providers.delete(id); },
-    async query(text) {
+    async query(text, opts = {}) {
       const out = [];
       await Promise.all([...providers].map(async ([id, fn]) => {
         try { (await fn(String(text || '').trim()) || []).forEach(r => out.push({ provider: id, score: 0.3, ...r })); }
         catch (e) { console.warn(`[Mirage:intents] ${id}:`, e); }
       }));
-      return out.sort((a, b) => b.score - a.score).slice(0, 14);
+      if (opts.rank) for (const r of out) r.score = opts.rank(r);
+      return out.sort((a, b) => b.score - a.score).slice(0, opts.limit || 14);
     },
     async run(result) { if (typeof result?.run === 'function') return result.run(); },
   };

@@ -58,6 +58,7 @@
   window.addEventListener('keydown', function (e) {
     if ((e.ctrlKey || e.altKey) && e.code === 'Space') { e.preventDefault(); post({ t: 'key', key: 'wish' }); }
     if (e.altKey && e.code === 'KeyM') { e.preventDefault(); post({ t: 'key', key: 'menu' }); }
+    if (e.altKey && e.code === 'KeyP') { e.preventDefault(); post({ t: 'key', key: 'pocket' }); }
   });
 
   var EDITABLE = 'textarea,input:not([type=button]):not([type=submit]):not([type=checkbox]):not([type=radio]):not([type=range]):not([type=color]):not([type=file]),[contenteditable=""],[contenteditable="true"]';
@@ -90,6 +91,30 @@
     var list = res && !Array.isArray(res) ? res.items : res;
     call('menu.open', e.clientX, e.clientY, packMenu(list, 0), { bare: bare }).catch(function () { });
   }, true);
+
+  function copied() {
+    var a = document.activeElement, t = '';
+    try {
+      if (a && /^(TEXTAREA|INPUT)$/.test(a.tagName) && typeof a.selectionStart === 'number' && a.selectionEnd > a.selectionStart) t = a.value.slice(a.selectionStart, a.selectionEnd);
+      else t = String(window.getSelection() || '');
+    } catch (err) { }
+    if (!t.trim() || (a && (a.type === 'password' || (a.closest && a.closest('[data-noclip],[autocomplete*=password],[autocomplete=one-time-code]'))))) return;
+    call('inventory.add', t.slice(0, 4000)).catch(function () { });
+  }
+  document.addEventListener('copy', copied, true);
+  document.addEventListener('cut', copied, true);
+
+  function copied() {
+    var a = document.activeElement, t = '';
+    try {
+      if (a && /^(TEXTAREA|INPUT)$/.test(a.tagName) && typeof a.selectionStart === 'number' && a.selectionEnd > a.selectionStart) t = a.value.slice(a.selectionStart, a.selectionEnd);
+      else t = String(window.getSelection() || '');
+    } catch (err) { }
+    if (!t.trim() || (a && (a.type === 'password' || (a.closest && a.closest('[data-noclip],[autocomplete*=password],[autocomplete=one-time-code]'))))) return;
+    call('inventory.add', t.slice(0, 4000)).catch(function () { });
+  }
+  document.addEventListener('copy', copied, true);
+  document.addEventListener('cut', copied, true);
 
   function hi() { post({ t: 'ready' }); }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', hi); else hi();

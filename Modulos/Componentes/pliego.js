@@ -86,12 +86,12 @@ function registerComponent(Kernel) {
   }
 
   ui.on(el, 'click', e => {
-    const r = e.target.closest('[data-i]'); if (r) return go(+r.dataset.i);
-    const d = e.target.closest('[data-do]'); if (d) { close(); return run(d.dataset.do); }
-    const l = e.target.closest('[data-lens]'); if (l) return void M.lens.use(l.dataset.lens);
-    const m = e.target.closest('[data-mood]'); if (m) return void M.svc.get('mood')?.set(m.dataset.mood);
+    const r = e.target.closest('li[data-i]'); if (r) return go(+r.dataset.i);
+    const d = e.target.closest('button[data-do]'); if (d) { close(); return run(d.dataset.do); }
+    const l = e.target.closest('button[data-lens]'); if (l) return void M.lens.use(l.dataset.lens);        // not [data-lens]: #mirage-root carries one too
+    const m = e.target.closest('button[data-mood]'); if (m) return void M.svc.get('mood')?.set(m.dataset.mood);
   });
-  ui.on(el, 'pointerover', e => { const r = e.target.closest('[data-i]'); if (r && +r.dataset.i !== sel) { sel = +r.dataset.i; mark(); } });
+  ui.on(el, 'pointerover', e => { const r = e.target.closest('li[data-i]'); if (r && +r.dataset.i !== sel) { sel = +r.dataset.i; mark(); } });
   ui.on(document, 'pointerdown', e => { if (opened && !e.target.closest('#pliego,[data-p=menu]')) close(); });
   ui.on(window, 'blur', () => { if (opened) close(); });      // click inside a cell (iframe)
 
@@ -129,7 +129,12 @@ function registerComponent(Kernel) {
         .pl-a{width:230px;flex:none;border-right:var(--bw) dashed var(--edge)}
         .pl-b{flex:1;border-right:var(--bw) dashed var(--edge)}
         .pl-c{width:200px;flex:none;border-right:var(--bw) solid var(--ink)}
-        @media(max-width:700px){.pl-a{display:none}} @media(max-width:480px){.pl-c{display:none}}
+        @media(max-width:700px){
+          #pliego{flex-direction:column;overflow-y:auto;height:calc(100% - 66px)}
+          .pl-a,.pl-b,.pl-c{width:auto;flex:none;border-right:0;border-bottom:var(--bw) solid var(--ink)}
+          .pl-b{order:-1;height:250px}
+          .pl-sp{display:none}
+        }
         .pl-brand{display:flex;align-items:center;justify-content:space-between;gap:8px}
         .pl-brand b{font:600 18px/1 var(--mono);letter-spacing:.4em;text-transform:uppercase}
         .pl-stamp{border:var(--bw) solid var(--ink);padding:3px 7px;font:600 10px/1 var(--mono);letter-spacing:.14em;text-transform:uppercase;transform:rotate(-4deg)}

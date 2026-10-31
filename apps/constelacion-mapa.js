@@ -8,7 +8,7 @@
   const $ = id => document.getElementById(id);
   const cv = $('map'), box = $('mapbox'), tip = $('tip'), info = $('mapinfo'), g = cv.getContext('2d');
   const R0 = 56, R1 = 250, TAU = 25 * 60e3, UNKNOWN = 2 * 3600e3, MAX_RECENT = 12;
-  const HALF = { cell: [9, 9], file: [5, 6.5], svc: [3, 3] };
+  const HALF = { cell: [9, 9], file: [5, 6.5], svc: [3, 3], ghost: [9, 9] };
   const RINGS = [[5 * 60e3, '5 min'], [30 * 60e3, '30 min'], [2 * 3600e3, '2 h']];
   const mono = 'ui-monospace,"Cascadia Mono",Consolas,monospace';
   const base = p => String(p).split('/').pop();
@@ -28,17 +28,16 @@
     return (C = { ink: v('--ink'), ink2: v('--ink2'), line: v('--line'), edge: v('--edge'), cell: v('--cell-bg'), bw: parseFloat(v('--bw')) || 2 });
   }
 
-  /* ── data → graph. Nodes keep their position between refreshes (they are keyed). ── */
   async function load() {
     if (box.hidden) return;
-    let procs, cells, scraps, log;
+    let procs, cells, scraps, log, ghosts;
     try {
-      [procs, cells, scraps, log] = await Promise.all([
+      [procs, cells, scraps, log, ghosts] = await Promise.all([
         Mirage.sys.procs(), Mirage.cell.list(),
         Mirage.scraps.list().catch(() => []), Mirage.chronicle.log(250).catch(() => []),
+        Mirage.ghosts.list().catch(() => []),
       ]);
     } catch { return; }
-
     const byCell = new Map(cells.map(c => [c.id, c])), old = nodes, next = new Map(), byPid = new Map();
     edges = [];
     const put = (key, props) => {
@@ -77,6 +76,7 @@
         for (const c of byPid.values()) if (c.file === path) edges.push({ a: c, b: n, kind: 'uses' });
       }
     }
+    for (const x of ghosts) put('g' + x.id, { type: 'ghost', gid: x.id, label: x.title, appId: x.appId, t: x.closedAt });
 
     const changed = next.size !== old.size || [...next.keys()].some(k => !old.has(k));
     nodes = next;
@@ -87,9 +87,9 @@
   }
 
   function refreshInfo() {
-    let c = 0, f = 0;
-    for (const n of nodes.values()) { if (n.type === 'cell') c++; else if (n.type === 'file') f++; }
-    info.textContent = `${c} cells · ${f} files · ${edges.filter(e => e.kind === 'thread').length} threads`;
+    let c = 0, f = 0, x = 0;
+    for (const n of nodes.values()) { if (n.type === 'cell') c++; else if (n.type === 'file') f++; else if (n.type === 'ghost') x++; }
+    info.textContent = `${c} cells · ${f} files · ${edges.filter(e => e.kind === 'thread').length} threads${x ? ` · ${x} closed` : ''}`;
   }
   function flash(s) { info.textContent = s; clearTimeout(flashT); flashT = setTimeout(refreshInfo, 3000); }
 
@@ -136,12 +136,22 @@
     for (const e of edges) { if (e.a === n) s.add(e.b); else if (e.b === n) s.add(e.a); }
     return s;
   }
+  let lastS = 0;
+  function sharp() {
+    let s = 1;
+    try { const f = window.frameElement, r = f.getBoundingClientRect(); s = r.width / (f.clientWidth || 1); } catch { }
+    return Math.min(4, Math.max(1, s)) * (devicePixelRatio || 1);
+  }
   function draw() {
-    const w = cv.clientWidth, h = cv.clientHeight, dpr = devicePixelRatio || 1;
+    const w = cv.clientWidth, h = cv.clientHeight;
     if (!w || !h) return;
-    if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr)) { cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr); }
+    lastS = sharp();
+    let q = lastS;
+    while (q > 1 && w * h * q * q > 16e6) q -= .25;
+    const bw = Math.round(w * q), bh = Math.round(h * q);
+    if (cv.width !== bw || cv.height !== bh) { cv.width = bw; cv.height = bh; }
     const c = colors(), k = view.k, lw = c.bw / k, near = hover ? neighbours(hover) : null;
-    g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, w, h);
+    g.setTransform(q, 0, 0, q, 0, 0); g.clearRect(0, 0, w, h);
     g.save(); g.translate(w / 2 + view.x, h / 2 + view.y); g.scale(k, k);
     g.lineWidth = lw;
 
@@ -163,6 +173,7 @@
       const [hw, hh] = HALF[n.type], on = n === hover;
       g.globalAlpha = (near && !near.has(n) ? .15 : 1) * (on ? 1 : fadeOf(ageOf(n)));
       if (n.type === 'svc') { g.fillStyle = c.ink2; g.fillRect(n.x - hw, n.y - hh, hw * 2, hh * 2); continue; }
+      if (n.type === 'ghost') { g.strokeStyle = on ? c.ink : c.ink2; g.lineWidth = lw; g.setLineDash([2 / k, 4 / k]); g.strokeRect(n.x - hw, n.y - hh, hw * 2, hh * 2); continue; }
       g.fillStyle = on ? c.ink : c.cell; g.strokeStyle = c.ink; g.lineWidth = lw;
       g.setLineDash(n.stowed || n.type === 'file' ? [3 / k, 3 / k] : []);
       g.fillRect(n.x - hw, n.y - hh, hw * 2, hh * 2); g.strokeRect(n.x - hw, n.y - hh, hw * 2, hh * 2);
@@ -209,13 +220,15 @@
   function activate(n) {
     if (n.type === 'cell') Mirage.cell.focus(n.cellId).catch(e => flash(e.message));
     else if (n.type === 'file') Mirage.fs.open(n.path).catch(e => flash(e.message));
+    else if (n.type === 'ghost') Mirage.ghosts.revive(n.gid).then(load).catch(e => flash(e.message));
   }
   function showTip(n, e) {
     if (!n) { tip.hidden = true; return; }
     const lines = n.type === 'cell'
       ? [n.label, `${n.appId} · pid ${n.pid}`, `opened ${ago(n.t)} ago${n.stowed ? ' · in the pocket' : ''}`, n.file || '']
       : n.type === 'file' ? [n.label, n.path, n.t ? `written ${ago(n.t)} ago` : '', n.pinned ? 'pinned on the table' : '']
-        : [n.label, 'service · pid ' + n.pid];
+        : n.type === 'ghost' ? [n.label, `closed ${ago(n.t)} ago`, 'click to bring it back']
+          : [n.label, 'service · pid ' + n.pid];
     tip.textContent = lines.filter(Boolean).join('\n'); tip.hidden = false;
     const r = box.getBoundingClientRect();
     tip.style.left = Math.max(4, Math.min(e.clientX - r.left + 14, r.width - tip.offsetWidth - 6)) + 'px';
@@ -282,6 +295,10 @@
       { label: 'Pin to the table', run: () => Mirage.scraps.pin(n.path).then(load).catch(e => flash(e.message)) },
       hold,
     ];
+    if (n.type === 'ghost') return [
+      { label: 'Bring back', run: () => activate(n) },
+      { label: 'Forget', run: () => Mirage.ghosts.forget(n.gid).then(load).catch(e => flash(e.message)) },
+    ];
     return [{ label: 'Service · ' + n.label, disabled: true }];
   });
 
@@ -306,6 +323,7 @@
     Mirage.on('tokens', () => { C = null; draw(); });
     setInterval(() => { if (!box.hidden && !document.hidden) load(); }, 5000);
     new ResizeObserver(() => draw()).observe(box);
+    setInterval(() => { if (!box.hidden && sharp() !== lastS) draw(); }, 300);
     show('map');
   });
 })();

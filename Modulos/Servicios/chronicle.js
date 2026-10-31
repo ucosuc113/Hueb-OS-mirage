@@ -74,8 +74,8 @@ function registerService(Kernel) {
         if (revs[src]) { revs[dst] = revs[src]; delete revs[src]; }
         add('move', `Moved ${base(src)} → ${dst}`, { path: dst });
       });
-      on('procs:spawn', ({ appId }) => { if (appId && !appId.startsWith('/') && M.boot) add('open', `Opened ${appId}`); });
-      on('procs:kill', ({ appId }) => { if (appId && !appId.startsWith('/') && M.boot) add('close', `Closed ${appId}`); });
+      on('procs:spawn', ({ appId }) => { if (appId && !appId.startsWith('/') && M.boot) add('open', `Opened ${appId}`, { appId }); });
+      on('procs:kill', ({ appId }) => { if (appId && !appId.startsWith('/') && M.boot) add('close', `Closed ${appId}`, { appId }); });
       on('notifications:push', (n) => { if (n.category !== 'mirage') add('notice', n.title); });
       on('users:login', (u) => add('login', `${u.name}'s session`));
       on('ready', (e) => add('boot', `System started · session #${e.sessionCount}${e.safeMode ? ' (safe mode)' : ''}`));

@@ -468,7 +468,11 @@ function registerComponent(Kernel) {
         list: () => list.map(({ id, path }) => ({ id, path })),
       }, { pin: 'fs.read' }));
 
-      /* the right-click menu may start before or after this component, and may restart */
+      ui.defer(M.svc.provide('scraps', {
+        pin, note, blank, paste,
+        list: () => list.map(({ id, path, kind }) => ({ id, path, kind })),
+      }));
+
       const m = M.svc.get('menu'); if (m) hook(m);
       ui.defer(M.bus.on('svc:provided', ({ name } = {}) => { if (name === 'menu') hook(M.svc.get('menu')); }));
       ui.defer(unhook);

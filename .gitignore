@@ -1,3 +1,26 @@
 # Documentación interna: no se versiona
 ARCHITECTURE.md
 loquefalta.md
+
+# Herramientas y configuración local (no son del proyecto)
+.claude/
+.vscode/
+.idea/
+.vs/
+
+# Sistema operativo
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Temporales, logs, copias y secretos
+*.log
+*.tmp
+*.bak
+*.orig
+*.swp
+*~
+.cache/
+node_modules/
+.env
+.env.*

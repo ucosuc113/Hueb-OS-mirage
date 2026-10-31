@@ -1,16 +1,9 @@
-/* ═══════════════════════════════════════════════════════════════
-   MIRAGE · L0 · IGNITION — the bootloader.
-   Sequence: substrate → safe-mode window → Kernel.js → modules → session.
-   It is the only thing that survives if everything else fails: if the Kernel does not load, or there is no
-   interface, it offers its own rescue console without depending on any module.
-   Shared with the Kernel: only Kernel.js. Nothing else from the Hueb-OS environment.
-═══════════════════════════════════════════════════════════════ */
 (function () {
   'use strict';
   const M = window.Mirage;
   const $ = id => document.getElementById(id);
   const step = $('sp-step'), fill = $('sp-fill'), splash = $('splash');
-  const SAFE_WINDOW_MS = 700;           // minimum time for the user to ask for safe mode
+  const SAFE_WINDOW_MS = 700;
   const t0 = Date.now();
   let safe = false;
 
@@ -61,7 +54,7 @@
     progress(10, 'substrate ready');
     const left = SAFE_WINDOW_MS - (Date.now() - t0);
     if (left > 0) await wait(left);
-    if (safe) sessionStorage.setItem('huebos_safe_mode', '1');     // the Kernel consumes it at startup
+    if (safe) sessionStorage.setItem('huebos_safe_mode', '1');
 
     progress(30, 'loading kernel');
     try { await loadScript('Kernel.js'); } catch (e) { return failedKernel(e); }
@@ -75,6 +68,7 @@
     K.on('boot:critical', e => { step.textContent = 'critical failure: ' + (e && e.reason); });
 
     const ev = await M.ready;
+    await M.svc.get('lock')?.armed?.();
     progress(100, 'ready');
     splash.classList.add('gone');
     setTimeout(() => splash.remove(), 700);

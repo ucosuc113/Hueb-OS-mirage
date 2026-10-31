@@ -1,0 +1,1170 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Terminal</title>
+<script type="application/json" id="wos-manifest">
+{ "id": "terminal", "name": "Terminal", "version": "0.1.0",
+  "icon": "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M3 5h18v14H3z'/><path d='M7 10l3 2-3 2M12 15h5'/></svg>",
+  "category": "system", "description": "Command line for the system: files, cells, processes, pipes and scripts",
+  "keywords": ["shell", "console", "cli", "command", "prompt", "bash", "cmd"],
+  "permissions": ["fs.read", "fs.write", "fs.delete", "proc.kill", "system.config", "app.install", "notifications.send"],
+  "singleton": false, "winWidth": 700, "winHeight": 440 }
+</script>
+<style>
+  body{display:flex;flex-direction:column;overflow:hidden}
+  #cwd{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:12px var(--mono)}
+  #state{font:11px var(--mono);color:var(--ink2);white-space:nowrap}
+  #scroll{flex:1;min-height:0;overflow:auto;padding:10px 14px 16px;font:13px/1.55 var(--mono);cursor:text;outline:0}
+  .ln{white-space:pre-wrap;word-break:break-word;min-height:1.55em}
+  .ln.cmd .p{color:var(--ink2)}
+  .ln.dim{color:var(--ink2)}
+  .ln.head{font-weight:700}
+  .ln.err{border-left:var(--bw) solid var(--ink);padding-left:8px;margin-left:-10px}
+  .ents{display:flex;flex-wrap:wrap;gap:0 22px}
+  .ents.col{flex-direction:column}
+  .ent{white-space:pre}
+  .ent[data-path]{cursor:pointer}
+  .ent[data-path]:hover{background:var(--ink);color:var(--cell-bg)}
+  .ent.d{font-weight:700} .ent.l{font-style:italic} .ent.h{color:var(--ink2)}
+  .lrow{display:flex;gap:14px;white-space:pre}
+  .lrow .m{width:1ch} .lrow .sz{width:9ch;text-align:right;color:var(--ink2)} .lrow .dt{width:12ch;color:var(--ink2)}
+  #row{display:flex;gap:8px;align-items:baseline}
+  #row[hidden]{display:none}
+  #ps{white-space:pre;flex:none}
+  #ps b{font-weight:400;color:var(--ink2)}
+  #in{flex:1;min-width:0;border:0;padding:0;font:inherit;background:transparent;outline:0;caret-color:var(--ink)}
+</style></head>
+<body>
+  <div class="bar">
+    <span id="cwd">~</span>
+    <span id="state"></span>
+    <button id="clr" title="Clear (Ctrl+L)">Clear</button>
+  </div>
+  <div id="scroll" tabindex="-1">
+    <div id="out"></div>
+    <div id="row"><span id="ps"></span><input id="in" autocomplete="off" autocapitalize="off" spellcheck="false" data-noclip></div>
+  </div>
+<script>
+'use strict';
+const $ = id => document.getElementById(id);
+const HOME = '/device';
+
+/* ═══ shell state ═══════════════════════════════════════════════════════ */
+const sh = {
+  cwd: HOME, prev: HOME, status: 0, user: 'user',
+  env: {},            // variables the user set (persisted)
+  aliases: {},        // persisted
+  history: [],        // persisted, oldest first
+};
+const DEFAULT_ALIASES = { ll: 'ls -l', la: 'ls -a', '..': 'cd ..' };
+const save = (key, val) => Mirage.store.set(key, val).catch(() => { });
+const saveSoon = (() => { const t = {}; return (key, get) => { clearTimeout(t[key]); t[key] = setTimeout(() => save(key, get()), 500); }; })();
+
+class Abort extends Error { }
+const fail = (msg, code = 1) => Object.assign(new Error(msg), { code });
+
+/* ═══ paths ═════════════════════════════════════════════════════════════ */
+function resolvePath(p, base = sh.cwd) {
+  let s = String(p);
+  if (s === '~' || s.startsWith('~/')) s = HOME + s.slice(1);
+  if (!s.startsWith('/')) s = base + '/' + s;
+  const out = [];
+  for (const seg of s.split('/')) { if (!seg || seg === '.') continue; if (seg === '..') out.pop(); else out.push(seg); }
+  if (!out.length) return HOME;                       // going above the root stays at the root
+  if (out[0] !== 'device') throw fail(`'${p}': only ${HOME} can be reached from here`);
+  return '/' + out.join('/');
+}
+const nameOf = n => n.name || String(n.id).split('/').pop();
+const baseName = p => String(p).replace(/\/+$/, '').split('/').pop();
+const shortPath = p => p === HOME ? '~' : p.startsWith(HOME + '/') ? '~' + p.slice(HOME.length) : p;
+const relTo = p => p.startsWith(sh.cwd + '/') ? p.slice(sh.cwd.length + 1) : p;
+
+/* ═══ files (thin layer over Mirage.fs) ═════════════════════════════════ */
+const F = {
+  async stat(p) { try { return (await Mirage.fs.stat(p)) || null; } catch { return null; } },
+  list: p => Mirage.fs.list(p),
+};
+async function readText(p, label) {
+  const st = await F.stat(p), l = label ?? p;
+  if (!st) throw fail(`${l}: no such file`);
+  if (st.type === 'dir') throw fail(`${l}: is a directory`);
+  if (st.encoding === 'binary') throw fail(`${l}: binary file`);
+  return Mirage.fs.read(p);
+}
+async function* walk(p, c, hidden = true) {
+  for (const it of await F.list(p)) {
+    c && c.check();
+    if (!hidden && it.name.startsWith('.')) continue;
+    yield it;
+    if (it.type === 'dir') yield* walk(it.id, c, hidden);
+  }
+}
+async function copyNode(src, dst, recursive, c) {
+  c.check();
+  const st = await F.stat(src);
+  if (!st) throw fail(`${relTo(src)}: no such file or directory`);
+  if (st.type === 'dir') {
+    if (!recursive) throw fail(`${relTo(src)}: is a folder (use -r)`);
+    if (dst === src || dst.startsWith(src + '/')) throw fail(`cannot copy a folder into itself`);
+    if (!(await F.stat(dst))) await Mirage.fs.mkdir(dst);
+    for (const it of await F.list(src)) await copyNode(it.id, dst + '/' + it.name, true, c);
+  } else if (st.encoding === 'binary') {
+    const url = await Mirage.fs.readDataURL(src);
+    const buf = await (await fetch(url)).arrayBuffer();
+    await Mirage.fs.writeBinary(dst, buf, st.mime || (url.match(/^data:([^;,]+)/) || [])[1] || 'application/octet-stream');
+  } else await Mirage.fs.write(dst, await Mirage.fs.read(src));
+}
+
+/* ═══ formatting ════════════════════════════════════════════════════════ */
+const lines = s => { const a = String(s).split('\n'); if (a[a.length - 1] === '') a.pop(); return a; };
+function fmtSize(n, human) {
+  if (!human) return String(n);
+  return n < 1024 ? n + ' B' : n < 1048576 ? (n / 1024).toFixed(1) + ' KB' : (n / 1048576).toFixed(1) + ' MB';
+}
+function fmtDate(t) {
+  if (!t) return '-';
+  const d = new Date(t), old = Date.now() - t > 15552000000;
+  const day = d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
+  return day + ' ' + (old ? d.getFullYear() : d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }));
+}
+function fmtSpan(s) {
+  s = Math.max(0, s | 0);
+  const d = s / 86400 | 0, h = s % 86400 / 3600 | 0, m = s % 3600 / 60 | 0;
+  return (d ? d + 'd ' : '') + (d || h ? h + 'h ' : '') + (m || d || h ? m + 'm ' : '') + (s % 60) + 's';
+}
+const table = (rows, gap = 2) => {
+  const w = []; rows.forEach(r => r.forEach((c, i) => { w[i] = Math.max(w[i] || 0, String(c).length); }));
+  return rows.map(r => r.map((c, i) => i === r.length - 1 ? String(c) : String(c).padEnd(w[i] + gap)).join('')).join('\n');
+};
+const globRe = (pat, ci) => new RegExp('^' + pat.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.') + '$', ci ? 'i' : '');
+function lev(a, b) {
+  const d = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)]);
+  for (let j = 1; j <= b.length; j++) d[0][j] = j;
+  for (let i = 1; i <= a.length; i++) for (let j = 1; j <= b.length; j++)
+    d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+  return d[a.length][b.length];
+}
+
+/* ═══ screen ════════════════════════════════════════════════════════════ */
+const ui = {
+  cur: null, raf: 0,
+  newLine(cls) {
+    const d = document.createElement('div');
+    d.className = 'ln' + (cls ? ' ' + cls : '');
+    $('out').appendChild(d);
+    if ($('out').childElementCount > 4000) for (let i = 0; i < 500; i++) $('out').firstElementChild.remove();
+    return d;
+  },
+  put(text, cls) {
+    const parts = String(text).split('\n');
+    parts.forEach((p, i) => {
+      const more = i < parts.length - 1;
+      if (!this.cur && (p !== '' || more)) this.cur = this.newLine(cls);
+      if (this.cur && p !== '') this.cur.appendChild(document.createTextNode(p));
+      if (more) this.cur = null;
+    });
+    this.bottom();
+  },
+  html(node) {
+    this.cur = null;
+    const d = this.newLine(); d.appendChild(node);
+    this.bottom();
+  },
+  echo(line, suffix = '') {
+    this.cur = null;
+    const d = this.newLine('cmd'), p = document.createElement('span');
+    p.className = 'p'; p.textContent = promptText() + ' ';
+    d.append(p, document.createTextNode(line + suffix));
+    this.bottom();
+  },
+  clear() { $('out').textContent = ''; this.cur = null; },
+  bottom() { if (!this.raf) this.raf = requestAnimationFrame(() => { this.raf = 0; $('scroll').scrollTop = $('scroll').scrollHeight; }); },
+};
+const promptText = () => `${sh.user} ${shortPath(sh.cwd)} ›`;
+
+let job = null, asking = null;
+function syncRow() {
+  const busy = !!job && !asking;
+  $('row').hidden = busy;
+  $('state').textContent = asking ? 'waiting for an answer' : busy ? 'running · Ctrl+C to cancel' : '';
+  if (asking) $('ps').textContent = asking.q + ' ';
+  else { const [u, ...r] = promptText().split(' '); $('ps').innerHTML = ''; const b = document.createElement('b'); b.textContent = u + ' '; $('ps').append(b, r.join(' ')); }
+  if (!busy) $('in').focus(); else $('scroll').focus();
+}
+function setCwd(p) {
+  sh.prev = sh.cwd; sh.cwd = p;
+  $('cwd').textContent = p;
+  Mirage.cell.setTitle(p === HOME ? 'Terminal' : 'Terminal · ' + baseName(p));
+  saveSoon('cwd', () => sh.cwd);
+  syncRow();
+}
+function ask(q) {
+  return new Promise(res => { asking = { q, res }; syncRow(); });
+}
+
+/* ═══ language: tokenizer → aliases → parser ═══════════════════════════
+   word = list of segments { k: 's' single-quoted · 'd' double-quoted · 'u' unquoted, v } */
+function matchParen(s, i) {           // s[i..i+1] is "$("; index right after the matching ")" or -1
+  let depth = 0, q = null;
+  for (let j = i + 1; j < s.length; j++) {
+    const c = s[j];
+    if (q) { if (c === '\\' && q === '"') j++; else if (c === q) q = null; continue; }
+    if (c === "'" || c === '"') q = c;
+    else if (c === '\\') j++;
+    else if (c === '(') depth++;
+    else if (c === ')' && --depth === 0) return j + 1;
+  }
+  return -1;
+}
+function tokenize(line) {
+  const toks = [], n = line.length;
+  let i = 0, word = null;
+  const seg = (k, v) => { word = word || []; const l = word[word.length - 1]; if (l && l.k === k) l.v += v; else word.push({ k, v }); };
+  const flush = () => { if (word) { toks.push({ w: word }); word = null; } };
+  const op = o => { flush(); toks.push({ op: o }); };
+  const sub = () => { const e = matchParen(line, i); if (e < 0) throw new Error('unterminated $('); const raw = line.slice(i, e); i = e; return raw; };
+  while (i < n) {
+    const c = line[i];
+    if (c === ' ' || c === '\t') { flush(); i++; continue; }
+    if (c === '#' && !word) break;
+    if (c === "'") {
+      const e = line.indexOf("'", i + 1);
+      if (e < 0) throw new Error('unterminated quote');
+      seg('s', line.slice(i + 1, e)); i = e + 1; continue;
+    }
+    if (c === '"') {
+      i++; let buf = '';
+      for (; ;) {
+        if (i >= n) throw new Error('unterminated quote');
+        const d = line[i];
+        if (d === '"') { i++; break; }
+        if (d === '\\' && i + 1 < n && '"\\$`'.includes(line[i + 1])) { seg('d', buf); buf = ''; seg('s', line[i + 1]); i += 2; }
+        else if (d === '$' && line[i + 1] === '(') buf += sub();
+        else { buf += d; i++; }
+      }
+      seg('d', buf); continue;
+    }
+    if (c === '\\') { if (i + 1 < n) { seg('s', line[i + 1]); i += 2; } else i++; continue; }
+    if (c === '$' && line[i + 1] === '(') { seg('u', sub()); continue; }
+    if (c === '|') { if (line[i + 1] === '|') { op('||'); i += 2; } else { op('|'); i++; } continue; }
+    if (c === '&' && line[i + 1] === '&') { op('&&'); i += 2; continue; }
+    if (c === ';') { op(';'); i++; continue; }
+    if (c === '>') { if (line[i + 1] === '>') { op('>>'); i += 2; } else { op('>'); i++; } continue; }
+    if (c === '<') { op('<'); i++; continue; }
+    seg('u', c); i++;
+  }
+  flush();
+  return toks;
+}
+function applyAliases(toks) {
+  const out = [], queue = toks.slice(), seen = new Set();
+  let atStart = true, budget = 100;
+  while (queue.length) {
+    const t = queue.shift();
+    if (t.op) { out.push(t); atStart = ['|', '||', '&&', ';'].includes(t.op); if (atStart) seen.clear(); continue; }
+    const name = t.w.length === 1 && t.w[0].k === 'u' ? t.w[0].v : null;
+    if (atStart && name && Object.prototype.hasOwnProperty.call(sh.aliases, name) && !seen.has(name)) {
+      if (--budget < 0) throw new Error('alias loop');
+      seen.add(name); queue.unshift(...tokenize(sh.aliases[name])); continue;
+    }
+    out.push(t); atStart = false;
+  }
+  return out;
+}
+function parse(toks) {
+  const items = [], syn = t => new Error(`syntax error near '${t}'`);
+  let cmd = { words: [], redirs: [] }, pipe = [], conn = ';';
+  const endCmd = () => { if (!cmd.words.length && !cmd.redirs.length) return false; pipe.push(cmd); cmd = { words: [], redirs: [] }; return true; };
+  for (let k = 0; k < toks.length; k++) {
+    const t = toks[k];
+    if (t.w) { cmd.words.push(t.w); continue; }
+    if (t.op === '>' || t.op === '>>' || t.op === '<') {
+      const nx = toks[k + 1];
+      if (!nx || !nx.w) throw syn(nx ? nx.op : 'end of line');
+      cmd.redirs.push({ op: t.op, w: nx.w }); k++; continue;
+    }
+    if (!endCmd()) { if (t.op === ';' && !pipe.length && conn === ';') continue; throw syn(t.op); }
+    if (t.op === '|') continue;
+    items.push({ pipe, conn }); pipe = []; conn = t.op;
+  }
+  const had = endCmd();
+  if (!had && pipe.length) throw syn('|');
+  if (pipe.length) items.push({ pipe, conn });
+  else if (conn === '&&' || conn === '||') throw syn('end of line');
+  return items;
+}
+
+/* ═══ expansion: ~  $VAR  ${VAR}  $?  $(cmd)  * ? ═══════════════════════ */
+const BUILTIN_ENV = () => ({ HOME, USER: sh.user, SHELL: 'mirage-sh', TERM: 'mirage', PWD: sh.cwd, OLDPWD: sh.prev });
+const getVar = n => n === '?' ? String(sh.status) : (n in sh.env ? sh.env[n] : (BUILTIN_ENV()[n] ?? ''));
+async function expandVars(s, io) {
+  let out = '';
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (c !== '$') { out += c; continue; }
+    const nx = s[i + 1];
+    if (nx === '(') {
+      const e = matchParen(s, i);
+      if (e < 0) { out += c; continue; }
+      out += await io.subst(s.slice(i + 2, e - 1)); i = e - 1;
+    } else if (nx === '{') {
+      const e = s.indexOf('}', i);
+      if (e < 0) { out += c; continue; }
+      out += getVar(s.slice(i + 2, e)); i = e;
+    } else if (nx === '?') { out += getVar('?'); i++; }
+    else {
+      const m = /^[A-Za-z_][A-Za-z0-9_]*/.exec(s.slice(i + 1));
+      if (m) { out += getVar(m[0]); i += m[0].length; } else out += c;
+    }
+  }
+  return out;
+}
+async function expandWord(w, io) {
+  const parts = [];
+  for (let k = 0; k < w.length; k++) {
+    const sg = w[k];
+    if (sg.k === 's') { parts.push({ t: sg.v, g: false }); continue; }
+    let v = sg.v;
+    if (k === 0 && sg.k === 'u' && (v === '~' || v.startsWith('~/'))) v = HOME + v.slice(1);
+    parts.push({ t: await expandVars(v, io), g: sg.k === 'u' });
+  }
+  const text = parts.map(p => p.t).join('');
+  const quoted = w.some(sg => sg.k !== 'u');
+  if (!text && !quoted) return [];
+  if (!parts.some(p => p.g && /[*?]/.test(p.t))) return [text];
+  /* wildcards only in the last path segment; the folder part stays literal */
+  const act = parts.flatMap(p => [...p.t].map(ch => p.g && (ch === '*' || ch === '?')));
+  const cut = text.lastIndexOf('/') + 1;
+  if (act.slice(0, cut).some(Boolean)) return [text];
+  const re = new RegExp('^' + [...text.slice(cut)].map((ch, i) => act[cut + i] ? (ch === '*' ? '[^/]*' : '[^/]') : ch.replace(/[.+^${}()|[\]\\*?]/g, '\\$&')).join('') + '$');
+  try {
+    const dirPath = resolvePath(text.slice(0, cut) || '.');
+    const hit = (await F.list(dirPath)).map(i => i.name).filter(n => re.test(n) && (text[cut] === '.' || !n.startsWith('.'))).sort();
+    return hit.length ? hit.map(n => text.slice(0, cut) + n) : [text];
+  } catch { return [text]; }
+}
+
+/* ═══ execution ═════════════════════════════════════════════════════════
+   io = { job, tty, out(text, cls), err(text), html(node)|null, subst(cmd) } */
+async function execLine(line, io) {
+  const run = {
+    ...io,
+    subst: async inner => {
+      let buf = '';
+      await execLine(inner, { ...io, tty: false, html: null, out: t => { buf += t; } });
+      return buf.replace(/\n+$/, '');
+    },
+  };
+  let items;
+  try { items = parse(applyAliases(tokenize(line))); }
+  catch (e) { io.err(`mirage-sh: ${e.message}\n`); return 2; }
+  let status = 0;
+  for (const it of items) {
+    if (io.job.aborted) throw new Abort();
+    if (it.conn === '&&' && status !== 0) continue;
+    if (it.conn === '||' && status === 0) continue;
+    status = await runPipeline(it.pipe, run);
+    sh.status = status;
+  }
+  return status;
+}
+const isAssign = w => w[0].k === 'u' && /^[A-Za-z_][A-Za-z0-9_]*=/.test(w[0].v);
+function setVar(name, val) {
+  sh.env[name] = val;
+  saveSoon('env', () => sh.env);
+}
+async function runPipeline(pipe, io) {
+  let stdin = null, status = 0;
+  for (let k = 0; k < pipe.length; k++) {
+    if (io.job.aborted) throw new Abort();
+    const cmd = pipe[k], last = k === pipe.length - 1;
+    try {
+      if (cmd.words.length && cmd.words.every(isAssign)) {          // NAME=value [NAME=value …]
+        for (const w of cmd.words) {
+          const eq = w[0].v.indexOf('=');
+          const val = await expandWord([{ k: 'u', v: w[0].v.slice(eq + 1) }, ...w.slice(1)], io);
+          setVar(w[0].v.slice(0, eq), val.join(' '));
+        }
+        status = 0; stdin = ''; continue;
+      }
+      const words = [];
+      for (const w of cmd.words) words.push(...await expandWord(w, io));
+      let sIn = stdin, outRedir = null;
+      for (const r of cmd.redirs) {
+        const [t] = await expandWord(r.w, io);
+        if (!t) throw fail('ambiguous redirect');
+        const p = resolvePath(t);
+        if (r.op === '<') sIn = await readText(p, t); else outRedir = { op: r.op, path: p, name: t };
+      }
+      const buf = { s: '' }, toTerm = last && !outRedir;
+      const sub = { ...io, tty: io.tty && toTerm, html: io.tty && toTerm ? io.html : null, out: toTerm ? io.out : t => { buf.s += t; } };
+      status = await runCommand(words, sub, sIn);
+      if (outRedir) {
+        const st = await F.stat(outRedir.path);
+        if (st && st.type === 'dir') throw fail(`${outRedir.name}: is a folder`);
+        await Mirage.fs.write(outRedir.path, outRedir.op === '>>' && st ? (await Mirage.fs.read(outRedir.path)) + buf.s : buf.s);
+      }
+      stdin = buf.s;
+    } catch (e) {
+      if (e instanceof Abort) throw e;
+      io.err(`mirage-sh: ${e.message || e}\n`); status = e.code || 1; stdin = '';
+    }
+  }
+  return status;
+}
+async function runCommand(words, io, stdin) {
+  if (!words.length) return 0;
+  const [name, ...args] = words;
+  const c = {
+    name, stdin, tty: io.tty, job: io.job, sh, html: io.html,
+    out: (t = '') => io.out(String(t) + '\n'),
+    raw: t => io.out(String(t)),
+    err: t => io.err(`${name}: ${t}\n`),
+    check: () => { if (io.job.aborted) throw new Abort(); },
+    path: p => resolvePath(p),
+    ask,
+    exec: line => execLine(line, io),
+  };
+  try {
+    const spec = lookup(name);
+    return (spec ? await spec.run(c, args) : await notFound(name, args, c)) | 0;
+  } catch (e) {
+    if (e instanceof Abort) throw e;
+    io.err(`${name}: ${e.message || e}\n`);
+    return e.code || 1;
+  }
+}
+async function notFound(name, args, c) {
+  if (name.includes('/') || /\.sh$/i.test(name)) {
+    const p = c.path(name), st = await F.stat(p);
+    if (st && st.type === 'file') return runScript(await readText(p), c);
+  }
+  const app = await findApp(name);
+  if (app) { await launchApp(app, args, c); return 0; }
+  const near = suggest(name);
+  c.err(`command not found` + (near ? ` · did you mean '${near}'?` : ' · try help'));
+  return 127;
+}
+async function runScript(text, c) {
+  let st = 0;
+  for (const l of lines(text)) {
+    c.check();
+    if (!l.trim() || l.trim().startsWith('#')) continue;
+    st = await c.exec(l); sh.status = st;
+  }
+  return st;
+}
+
+/* ═══ command registry ══════════════════════════════════════════════════ */
+const COMMANDS = new Map(), ALIASES = new Map();
+function def(name, group, usage, desc, run, aliases = []) {
+  COMMANDS.set(name, { name, group, usage, desc, run, aliases });
+  aliases.forEach(a => ALIASES.set(a, name));
+}
+const lookup = n => COMMANDS.get(n) || COMMANDS.get(ALIASES.get(n));
+function suggest(n) {
+  let best = null, bd = n.length <= 4 ? 2 : 3;
+  for (const k of [...COMMANDS.keys(), ...ALIASES.keys()]) { if (k.length < 2) continue; const d = lev(n, k); if (d < bd) { bd = d; best = k; } }
+  return best;
+}
+/* spec: { b: boolean short flags, v: short flags with a value, l: { long: short }, n: letter that receives -NUM } */
+function flags(args, spec = {}) {
+  const f = {}, rest = [], bool = spec.b || '', val = spec.v || '', long = spec.l || {};
+  let end = false;
+  for (let k = 0; k < args.length; k++) {
+    const a = args[k];
+    if (end || a === '-' || a[0] !== '-') { rest.push(a); continue; }
+    if (a === '--') { end = true; continue; }
+    if (a.startsWith('--')) {
+      const eq = a.indexOf('='), nm = a.slice(2, eq < 0 ? undefined : eq), key = long[nm];
+      if (!key) throw fail(`unrecognized option '--${nm}'`, 2);
+      f[key] = val.includes(key) ? (eq < 0 ? args[++k] : a.slice(eq + 1)) : true;
+      continue;
+    }
+    if (spec.n && /^-\d+$/.test(a)) { f[spec.n] = a.slice(1); continue; }
+    for (let j = 1; j < a.length; j++) {
+      const ch = a[j];
+      if (bool.includes(ch)) f[ch] = true;
+      else if (val.includes(ch)) {
+        f[ch] = a.slice(j + 1) || args[++k];
+        if (f[ch] === undefined) throw fail(`option requires an argument -- '${ch}'`, 2);
+        break;
+      } else throw fail(`invalid option -- '${ch}'`, 2);
+    }
+  }
+  return { f, rest };
+}
+async function inputText(c, files) {
+  if (files.length) { let s = ''; for (const f of files) { c.check(); s += await readText(c.path(f), f); } return s; }
+  if (c.stdin == null) throw fail('no input: give it a file or pipe something in');
+  return c.stdin;
+}
+
+/* ── files ── */
+function entNode(i, text) {
+  const s = document.createElement('span');
+  s.className = 'ent' + (i.type === 'dir' ? ' d' : i.type === 'shortcut' ? ' l' : '') + (i.name[0] === '.' ? ' h' : '');
+  s.textContent = text ?? (i.name + (i.type === 'dir' ? '/' : ''));
+  s.dataset.path = i.id; s.dataset.type = i.type;
+  return s;
+}
+def('ls', 'files', 'ls [-alh1] [path…]', 'list what is inside a folder', async (c, args) => {
+  const { f, rest } = flags(args, { b: 'alh1', l: { all: 'a', long: 'l', 'human-readable': 'h' } });
+  const targets = rest.length ? rest : ['.'];
+  let status = 0;
+  for (const [k, t] of targets.entries()) {
+    const p = c.path(t), st = await F.stat(p);
+    if (!st) { c.err(`cannot access '${t}': no such file or directory`); status = 1; continue; }
+    let items = st.type === 'dir' ? await F.list(p) : [{ ...st, name: nameOf(st) }];
+    if (!f.a) items = items.filter(i => !i.name.startsWith('.'));
+    if (targets.length > 1 && st.type === 'dir') c.out((k ? '\n' : '') + t + ':');
+    if (!items.length) continue;
+    if (f.l) {
+      const rows = items.map(i => [i.type === 'dir' ? 'd' : i.type === 'shortcut' ? 'l' : '-', fmtSize(i.size || 0, f.h), fmtDate(i.mtime), i]);
+      if (c.tty) {
+        const box = document.createElement('div');
+        for (const [m, sz, dt, i] of rows) {
+          const r = document.createElement('div'); r.className = 'lrow';
+          r.innerHTML = '<span class="m"></span><span class="sz"></span><span class="dt"></span>';
+          r.children[0].textContent = m; r.children[1].textContent = sz; r.children[2].textContent = dt;
+          r.appendChild(entNode(i)); box.appendChild(r);
+        }
+        c.html(box);
+      } else c.out(table(rows.map(([m, sz, dt, i]) => [m, sz.padStart(8), dt, i.name]), 2));
+    } else if (c.tty) {
+      const box = document.createElement('div'); box.className = 'ents' + (f[1] ? ' col' : '');
+      items.forEach(i => box.appendChild(entNode(i)));
+      c.html(box);
+    } else c.out(items.map(i => i.name).join('\n'));
+  }
+  return status;
+});
+def('dir', 'files', 'dir [-a] [path]', 'list a folder with dates, sizes and a total (hidden ones with -a)', async (c, args) => {
+  const { f, rest } = flags(args, { b: 'a' });
+  const t = rest[0] || '.', p = c.path(t), st = await F.stat(p);
+  if (!st) throw fail(`cannot find '${t}'`);
+  let items = st.type === 'dir' ? await F.list(p) : [{ ...st, name: nameOf(st) }];
+  if (!f.a) items = items.filter(i => !i.name.startsWith('.'));
+  const dirs = items.filter(i => i.type === 'dir').length, files = items.length - dirs;
+  const bytes = items.reduce((s, i) => s + (i.type === 'dir' ? 0 : i.size || 0), 0);
+  const rows = items.map(i => [fmtDate(i.mtime), i.type === 'dir' ? '<DIR>' : String(i.size || 0), i]);
+  c.out(`Folder of ${st.type === 'dir' ? p : p.replace(/\/[^/]*$/, '') || HOME}\n`);
+  if (c.tty && rows.length) {
+    const box = document.createElement('div');
+    for (const [dt, sz, i] of rows) {
+      const r = document.createElement('div'); r.className = 'lrow';
+      r.innerHTML = '<span class="dt"></span><span class="sz"></span>';
+      r.children[0].textContent = dt; r.children[1].textContent = sz;
+      r.appendChild(entNode(i)); box.appendChild(r);
+    }
+    c.html(box);
+  } else if (rows.length) c.out(table(rows.map(([dt, sz, i]) => [dt, sz.padStart(9), i.name]), 2));
+  c.out(`\n${String(files).padStart(6)} file(s)  ${fmtSize(bytes, true)}\n${String(dirs).padStart(6)} folder(s)`);
+});
+def('cd', 'files', 'cd [path | -]', 'change folder', async (c, [t]) => {
+  const p = t === '-' ? sh.prev : c.path(t ?? '~'), st = await F.stat(p);
+  if (!st) throw fail(`${t}: no such folder`);
+  if (st.type !== 'dir') throw fail(`${t}: not a folder`);
+  setCwd(p);
+});
+def('pwd', 'files', 'pwd', 'show the current folder', c => c.out(sh.cwd));
+def('cat', 'files', 'cat [-n] [file…]', 'print files (or what comes through the pipe)', async (c, args) => {
+  const { f, rest } = flags(args, { b: 'n' });
+  const ls = lines(await inputText(c, rest));
+  c.out(ls.map((l, i) => f.n ? String(i + 1).padStart(5) + '  ' + l : l).join('\n'));
+});
+def('head', 'files', 'head [-n N] [file…]', 'first lines', async (c, args) => {
+  const { f, rest } = flags(args, { v: 'n', n: 'n' });
+  const ls = lines(await inputText(c, rest)).slice(0, +f.n || 10);
+  if (ls.length) c.out(ls.join('\n'));
+});
+def('tail', 'files', 'tail [-n N] [file…]', 'last lines', async (c, args) => {
+  const { f, rest } = flags(args, { v: 'n', n: 'n' });
+  const ls = lines(await inputText(c, rest)), n = +f.n || 10;
+  if (ls.length) c.out(ls.slice(-n).join('\n'));
+});
+def('touch', 'files', 'touch file…', 'create empty files that do not exist yet', async (c, args) => {
+  if (!args.length) throw fail('usage: touch file…', 2);
+  for (const a of args) { const p = c.path(a); if (!(await F.stat(p))) await Mirage.fs.write(p, ''); }
+});
+def('mkdir', 'files', 'mkdir [-p] folder…', 'create folders (-p: and the ones in between)', async (c, args) => {
+  const { f, rest } = flags(args, { b: 'p' });
+  if (!rest.length) throw fail('usage: mkdir [-p] folder…', 2);
+  for (const a of rest) {
+    const p = c.path(a);
+    if (f.p) {
+      let acc = HOME;
+      for (const seg of p.slice(HOME.length + 1).split('/').filter(Boolean)) {
+        acc += '/' + seg;
+        if (!(await F.stat(acc))) await Mirage.fs.mkdir(acc);
+      }
+    } else {
+      if (await F.stat(p)) throw fail(`${a}: already exists`);
+      await Mirage.fs.mkdir(p);
+    }
+  }
+});
+def('rm', 'files', 'rm [-rf] path…', 'delete files; folders need -r (and a yes unless -f)', async (c, args) => {
+  const { f, rest } = flags(args, { b: 'rf' });
+  if (!rest.length) throw fail('usage: rm [-rf] path…', 2);
+  let status = 0;
+  for (const a of rest) {
+    const p = c.path(a), st = await F.stat(p);
+    if (p === HOME) throw fail(`refusing to remove ${HOME}`);
+    if (!st) { if (!f.f) { c.err(`${a}: no such file or folder`); status = 1; } continue; }
+    if (st.type === 'dir') {
+      if (!f.r) { c.err(`${a}: is a folder (use -r)`); status = 1; continue; }
+      if (!f.f) {
+        const ans = await c.ask(`delete folder '${a}' and everything inside? [y/N]`);
+        if (!/^y(es)?$/i.test((ans || '').trim())) { c.out('kept ' + a); continue; }
+      }
+    }
+    await Mirage.fs.remove(p, !!f.r);
+  }
+  return status;
+}, ['del']);
+def('mv', 'files', 'mv source… target', 'move or rename', async (c, args) => {
+  if (args.length < 2) throw fail('usage: mv source… target', 2);
+  const dst = c.path(args[args.length - 1]), dstSt = await F.stat(dst), srcs = args.slice(0, -1);
+  if (srcs.length > 1 && dstSt?.type !== 'dir') throw fail('the target must be a folder when moving several things');
+  for (const a of srcs) {
+    const s = c.path(a);
+    if (!(await F.stat(s))) throw fail(`${a}: no such file or folder`);
+    await Mirage.fs.move(s, dstSt?.type === 'dir' ? dst + '/' + baseName(s) : dst);
+  }
+}, ['rename']);
+def('cp', 'files', 'cp [-r] source… target', 'copy files (-r: folders)', async (c, args) => {
+  const { f, rest } = flags(args, { b: 'r' });
+  if (rest.length < 2) throw fail('usage: cp [-r] source… target', 2);
+  const dst = c.path(rest[rest.length - 1]), dstSt = await F.stat(dst), srcs = rest.slice(0, -1);
+  if (srcs.length > 1 && dstSt?.type !== 'dir') throw fail('the target must be a folder when copying several things');
+  for (const a of srcs) {
+    const s = c.path(a);
+    await copyNode(s, dstSt?.type === 'dir' ? dst + '/' + baseName(s) : dst, !!f.r, c);
+  }
+}, ['copy']);
+def('tree', 'files', 'tree [-a] [-L depth] [path]', 'draw a folder as a tree', async (c, args) => {
+  const { f, rest } = flags(args, { b: 'a', v: 'L' });
+  const max = f.L ? +f.L : Infinity, root = c.path(rest[0] || '.');
+  let nd = 0, nf = 0, n = 0, capped = false;
+  c.out(rest[0] || '.');
+  async function rec(p, prefix, d) {
+    let items = await F.list(p);
+    if (!f.a) items = items.filter(i => !i.name.startsWith('.'));
+    for (const [k, i] of items.entries()) {
+      c.check();
+      if (++n > 3000) { capped = true; return; }
+      const last = k === items.length - 1;
+      c.out(prefix + (last ? '└── ' : '├── ') + i.name + (i.type === 'dir' ? '/' : ''));
+      if (i.type === 'dir') { nd++; if (d < max) { await rec(i.id, prefix + (last ? '    ' : '│   '), d + 1); if (capped) return; } } else nf++;
+    }
+  }
+  await rec(root, '', 1);
+  c.out(`\n${nd} folder${nd === 1 ? '' : 's'}, ${nf} file${nf === 1 ? '' : 's'}${capped ? ' (cut at 3000 entries)' : ''}`);
+});
+def('stat', 'files', 'stat path…', 'details of a file or folder', async (c, args) => {
+  if (!args.length) throw fail('usage: stat path…', 2);
+  for (const a of args) {
+    const p = c.path(a), st = await F.stat(p);
+    if (!st) throw fail(`${a}: no such file or folder`);
+    c.out(table([
+      ['name', nameOf(st)], ['path', p], ['type', st.type + (st.encoding === 'binary' ? ' (binary)' : '')],
+      ['size', `${fmtSize(st.size || 0, true)} (${st.size || 0} bytes)`], ['mime', st.mime || '-'],
+      ['modified', st.mtime ? new Date(st.mtime).toLocaleString('en-GB') : '-'], ['created', st.ctime ? new Date(st.ctime).toLocaleString('en-GB') : '-'],
+    ]));
+  }
+});
+def('du', 'files', 'du [-h] [path]', 'how much space a folder takes', async (c, args) => {
+  const { f, rest } = flags(args, { b: 'h' });
+  const root = c.path(rest[0] || '.');
+  async function size(p) { let s = 0; for await (const i of walk(p, c)) if (i.type !== 'dir') s += i.size || 0; return s; }
+  const rows = [];
+  for (const i of await F.list(root)) { c.check(); if (i.type === 'dir') rows.push([fmtSize(await size(i.id), f.h), i.name + '/']); }
+  rows.push([fmtSize(await size(root), f.h), '.']);
+  c.out(table(rows));
+});
+def('find', 'files', 'find [path] [-name pat] [-iname pat] [-type f|d]', 'look for files by name', async (c, args) => {
+  let start = '.', re = null, type = null;
+  for (let k = 0; k < args.length; k++) {
+    const a = args[k];
+    if (a === '-name' || a === '-iname') re = globRe(args[++k] ?? '', a === '-iname');
+    else if (a === '-type') type = args[++k];
+    else if (a[0] === '-') throw fail(`unknown option ${a}`, 2);
+    else start = a;
+  }
+  const root = c.path(start), shown = start === '.' ? '.' : start.replace(/\/+$/, '');
+  if (!(await F.stat(root))) throw fail(`${start}: no such file or folder`);
+  const hits = [];
+  for await (const i of walk(root, c)) {
+    if (re && !re.test(i.name)) continue;
+    if (type === 'f' && i.type === 'dir') continue;
+    if (type === 'd' && i.type !== 'dir') continue;
+    hits.push(shown + i.id.slice(root.length));
+    if (hits.length >= 2000) { hits.push('… cut at 2000 results'); break; }
+  }
+  if (hits.length) c.out(hits.join('\n'));
+  return hits.length ? 0 : 1;
+});
+
+/* ── text ── */
+def('echo', 'text', 'echo [-ne] text…', 'print text', (c, args) => {
+  let nl = true, esc = false;
+  while (args[0] && /^-[ne]+$/.test(args[0])) { const a = args.shift(); if (a.includes('n')) nl = false; if (a.includes('e')) esc = true; }
+  let s = args.join(' ');
+  if (esc) s = s.replace(/\\(n|t|\\)/g, (_, k) => ({ n: '\n', t: '\t', '\\': '\\' }[k]));
+  nl ? c.out(s) : c.raw(s);
+});
+def('grep', 'text', 'grep [-inrvc] pattern [path…]', 'lines that match a regular expression', async (c, args) => {
+  const { f, rest } = flags(args, { b: 'inrvc' });
+  if (!rest.length) throw fail('usage: grep [-inrvc] pattern [path…]', 2);
+  let re; try { re = new RegExp(rest[0], f.i ? 'i' : ''); } catch (e) { throw fail('bad pattern: ' + e.message, 2); }
+  const targets = rest.slice(1), out = [];
+  let total = 0;
+  const scan = (text, label) => {
+    let n = 0;
+    lines(text).forEach((l, i) => {
+      if (re.test(l) === !!f.v) return;
+      n++; total++;
+      if (!f.c) out.push((label ? label + ':' : '') + (f.n ? (i + 1) + ':' : '') + l);
+    });
+    if (f.c) out.push((label ? label + ':' : '') + n);
+  };
+  if (!targets.length) scan(await inputText(c, []), '');
+  else {
+    const files = [];
+    for (const t of targets) {
+      const p = c.path(t), st = await F.stat(p);
+      if (!st) throw fail(`${t}: no such file or folder`);
+      if (st.type !== 'dir') files.push([p, t]);
+      else if (f.r) { for await (const i of walk(p, c)) if (i.type !== 'dir' && i.encoding !== 'binary') files.push([i.id, relTo(i.id)]); }
+      else c.err(`${t}: is a folder (use -r)`);
+    }
+    for (const [p, label] of files) {
+      c.check();
+      let text; try { text = await readText(p, label); } catch { continue; }
+      scan(text, files.length > 1 || f.r ? label : '');
+    }
+  }
+  if (out.length) c.out(out.join('\n'));
+  return total ? 0 : 1;
+});
+def('wc', 'text', 'wc [-lwc] [file…]', 'count lines, words and characters', async (c, args) => {
+  const { f, rest } = flags(args, { b: 'lwc' });
+  const t = await inputText(c, rest), all = !f.l && !f.w && !f.c;
+  const parts = [];
+  if (all || f.l) parts.push(lines(t).length);
+  if (all || f.w) parts.push(t.split(/\s+/).filter(Boolean).length);
+  if (all || f.c) parts.push(t.length);
+  c.out(parts.join('  '));
+});
+def('sort', 'text', 'sort [-rnu] [file…]', 'sort lines', async (c, args) => {
+  const { f, rest } = flags(args, { b: 'rnu' });
+  let ls = lines(await inputText(c, rest));
+  ls.sort(f.n ? (a, b) => parseFloat(a) - parseFloat(b) || a.localeCompare(b) : (a, b) => a.localeCompare(b));
+  if (f.u) ls = ls.filter((l, i) => i === 0 || l !== ls[i - 1]);
+  if (f.r) ls.reverse();
+  if (ls.length) c.out(ls.join('\n'));
+});
+def('uniq', 'text', 'uniq [-c]', 'collapse repeated neighbouring lines', async (c, args) => {
+  const { f, rest } = flags(args, { b: 'c' });
+  const out = [];
+  for (const l of lines(await inputText(c, rest))) {
+    if (out.length && out[out.length - 1][0] === l) out[out.length - 1][1]++; else out.push([l, 1]);
+  }
+  if (out.length) c.out(out.map(([l, n]) => f.c ? String(n).padStart(5) + ' ' + l : l).join('\n'));
+});
+def('tee', 'text', 'tee [-a] file', 'pass the pipe through and also save it', async (c, args) => {
+  const { f, rest } = flags(args, { b: 'a' });
+  if (!rest[0]) throw fail('usage: tee [-a] file', 2);
+  const p = c.path(rest[0]), t = c.stdin ?? '';
+  const prev = f.a && (await F.stat(p)) ? await Mirage.fs.read(p) : '';
+  await Mirage.fs.write(p, prev + t);
+  c.raw(t);
+});
+def('seq', 'text', 'seq [first] last', 'numbers from first to last', (c, [a, b]) => {
+  const lo = b === undefined ? 1 : +a, hi = b === undefined ? +a : +b;
+  if (!Number.isFinite(lo) || !Number.isFinite(hi)) throw fail('usage: seq [first] last', 2);
+  const out = []; for (let i = lo; i <= hi && out.length < 100000; i++) out.push(i);
+  if (out.length) c.out(out.join('\n'));
+});
+def('basename', 'text', 'basename path', 'last part of a path', (c, [p]) => c.out(baseName(p ?? '')));
+def('dirname', 'text', 'dirname path', 'everything but the last part of a path', (c, [p]) => c.out(String(p ?? '').replace(/\/+$/, '').replace(/\/?[^/]*$/, '') || '.'));
+def('calc', 'text', 'calc expression', 'arithmetic: calc 2 + 3 * (4 - 1)', (c, args) => {
+  const e = args.join(' ');
+  if (!/^[0-9+\-*/().%\s^e]+$/i.test(e) || !e.trim()) throw fail("numbers and + - * / % ^ ( ) only — quote the expression: calc '2 * (3 + 1)'", 2);
+  const v = Function('"use strict";return (' + e.replace(/\^/g, '**') + ')')();
+  c.out(String(v));
+});
+
+/* ── shell ── */
+def('help', 'shell', 'help [command]', 'list the commands, or explain one', (c, [name]) => {
+  if (name) {
+    const s = lookup(name);
+    if (!s) throw fail(`no such command: ${name}`);
+    c.out(s.usage + '\n  ' + s.desc + (s.aliases.length ? '\n  also: ' + s.aliases.join(', ') : ''));
+    return;
+  }
+  const G = { files: 'FILES', text: 'TEXT & PIPES', shell: 'SHELL', system: 'SYSTEM', apps: 'APPS' };
+  for (const [g, title] of Object.entries(G)) {
+    const rows = [...COMMANDS.values()].filter(s => s.group === g).sort((a, b) => a.name.localeCompare(b.name)).map(s => ['  ' + s.name, s.desc]);
+    c.out(title + '\n' + table(rows) + '\n');
+  }
+  c.out('Pipes  a | b    chains  a && b   a || b   a ; b    redirects  > >> <\n' +
+    'Words   $VAR  $(cmd)  ~  * ?  "quotes"  \\escape         scripts  any .sh file\n' +
+    'Keys    Tab complete · Up/Down history · Ctrl+C cancel · Ctrl+L clear · double-click a name to open it');
+}, ['?']);
+def('clear', 'shell', 'clear', 'wipe the screen (Ctrl+L)', () => ui.clear(), ['cls']);
+def('history', 'shell', 'history [-c] [n]', 'commands you ran before', (c, args) => {
+  const { f, rest } = flags(args, { b: 'c' });
+  if (f.c) { sh.history = []; saveSoon('history', () => sh.history); return; }
+  const n = +rest[0] || sh.history.length, from = Math.max(0, sh.history.length - n);
+  const out = sh.history.slice(from).map((l, i) => String(from + i + 1).padStart(5) + '  ' + l);
+  if (out.length) c.out(out.join('\n'));
+});
+def('alias', 'shell', 'alias [name=command]', 'short names for commands (no args: list them)', (c, args) => {
+  if (!args.length) {
+    const rows = Object.entries(sh.aliases).sort().map(([k, v]) => [k, '= ' + v]);
+    if (rows.length) c.out(table(rows)); return;
+  }
+  for (const a of args) {
+    const eq = a.indexOf('=');
+    if (eq < 1) { if (a in sh.aliases) c.out(`${a} = ${sh.aliases[a]}`); else throw fail(`${a}: not an alias`); continue; }
+    sh.aliases[a.slice(0, eq)] = a.slice(eq + 1);
+  }
+  saveSoon('aliases', () => sh.aliases);
+});
+def('unalias', 'shell', 'unalias name…', 'remove aliases', (c, args) => {
+  for (const a of args) { if (!(a in sh.aliases)) throw fail(`${a}: not an alias`); delete sh.aliases[a]; }
+  saveSoon('aliases', () => sh.aliases);
+});
+def('env', 'shell', 'env', 'show the variables', c => {
+  c.out(table(Object.entries({ ...BUILTIN_ENV(), ...sh.env }).map(([k, v]) => [k, '= ' + v])));
+});
+def('export', 'shell', 'export NAME=value', 'set a variable (same as NAME=value)', (c, args) => {
+  for (const a of args) { const eq = a.indexOf('='); if (eq < 1) throw fail('usage: export NAME=value', 2); setVar(a.slice(0, eq), a.slice(eq + 1)); }
+});
+def('unset', 'shell', 'unset NAME…', 'forget variables', (c, args) => {
+  args.forEach(a => delete sh.env[a]); saveSoon('env', () => sh.env);
+});
+def('which', 'shell', 'which name', 'what a name is: alias, command or app', async (c, [n]) => {
+  if (!n) throw fail('usage: which name', 2);
+  if (n in sh.aliases) return c.out(`${n}: alias for '${sh.aliases[n]}'`);
+  if (lookup(n)) return c.out(`${n}: command`);
+  const app = await findApp(n);
+  if (app) return c.out(`${n}: app '${app.name}' (${app.id})`);
+  throw fail(`${n}: not found`);
+}, ['type']);
+def('source', 'shell', 'source file', 'run the commands of a script file', async (c, [f]) => {
+  if (!f) throw fail('usage: source file', 2);
+  return runScript(await readText(c.path(f), f), c);
+}, ['.']);
+def('sleep', 'shell', 'sleep seconds', 'wait', async (c, [s]) => {
+  const n = parseFloat(s);
+  if (!(n >= 0)) throw fail('usage: sleep seconds', 2);
+  const end = Date.now() + n * 1000;
+  while (Date.now() < end) { c.check(); await new Promise(r => setTimeout(r, Math.min(60, end - Date.now()))); }
+});
+def('true', 'shell', 'true', 'do nothing, succeed', () => 0);
+def('false', 'shell', 'false', 'do nothing, fail', () => 1);
+def('date', 'shell', 'date', 'current date and time', c => c.out(new Date().toLocaleString('en-GB', { dateStyle: 'full', timeStyle: 'medium' })));
+def('exit', 'shell', 'exit', 'close this terminal', () => { Mirage.cell.close(); return 0; }, ['quit']);
+
+/* ── system ── */
+def('whoami', 'system', 'whoami', 'who you are', c => c.out(sh.user));
+def('sysinfo', 'system', 'sysinfo', 'kernel, uptime, mood, lens and counts', async c => {
+  const [i, a] = await Promise.all([Mirage.sys.info(), Mirage.sys.appearance().catch(() => ({}))]);
+  c.out(table([
+    ['user', `${sh.user}${i.safeMode ? '  (safe mode)' : ''}`],
+    ['kernel', `${i.kernel} · build ${i.build}`], ['mirage', i.mirage],
+    ['uptime', fmtSpan(i.uptime)], ['apps', `${i.apps} installed · ${i.cells} open`],
+    ['mood', a.mood ? `${a.mood.applied} (${a.mood.choice})` : '-'], ['lens', a.lens || '-'],
+  ]));
+}, ['neofetch', 'about']);
+def('uptime', 'system', 'uptime', 'how long the system has been up', async c => c.out(fmtSpan((await Mirage.sys.info()).uptime)));
+def('ps', 'system', 'ps', 'running processes', async c => {
+  const list = (await Mirage.sys.procs()).sort((a, b) => a.pid - b.pid);
+  c.out(table([['PID', 'PPID', 'STATE', 'APP', 'AGE', 'TITLE'],
+    ...list.map(p => [p.pid + (p.protected ? '*' : ''), p.parentPid ?? '-', p.state, baseName(p.appId), fmtSpan((Date.now() - p.spawnedAt) / 1000), p.title])]));
+});
+def('kill', 'system', 'kill pid…', 'close processes (ps shows the pids; * = protected)', async (c, args) => {
+  if (!args.length) throw fail('usage: kill pid…', 2);
+  for (const a of args) { if (!/^\d+$/.test(a)) throw fail(`${a}: not a pid`, 2); await Mirage.sys.kill(+a); }
+});
+def('modules', 'system', 'modules [restart path]', 'kernel modules (restart one by its path)', async (c, [sub, path]) => {
+  if (sub === 'restart') { if (!path) throw fail('usage: modules restart path', 2); c.out((await Mirage.sys.restartModule(path)) ? 'restarted' : 'not running'); return; }
+  const list = await Mirage.sys.modules();
+  const row = m => typeof m === 'string' ? [m] : [m.path || m.id || m.name || '?', m.kind || '', m.state || m.status || ''];
+  c.out(table((Array.isArray(list) ? list : Object.values(list)).map(row)));
+});
+def('mood', 'system', 'mood [name]', 'show or change the light of the system', async (c, [id]) => {
+  const a = await Mirage.sys.appearance();
+  if (!id) return c.out(`${a.mood.applied} (${a.mood.choice})\navailable: ${a.moods.map(m => m.id).join(', ')}`);
+  await Mirage.sys.setMood(id.toLowerCase());
+});
+def('lens', 'system', 'lens [name]', 'show or change how the cells are laid out', async (c, [id]) => {
+  const a = await Mirage.sys.appearance();
+  if (!id) return c.out(`${a.lens}\navailable: ${a.lenses.map(l => l.id).join(', ')}`);
+  await Mirage.sys.setLens(id.toLowerCase());
+});
+def('notify', 'system', 'notify title [text…]', 'send yourself a notification', async (c, [t, ...b]) => {
+  if (!t) throw fail('usage: notify title [text…]', 2);
+  await Mirage.notify.send({ title: t, body: b.join(' ') });
+});
+def('chron', 'system', 'chron log [n] | revisions path | restore path time', 'the Chronicle: what happened and older versions', async (c, [sub, a, b]) => {
+  if (sub === 'log' || !sub) {
+    const log = await Mirage.chronicle.log(+a || 15);
+    return c.out(log.length ? table(log.map(e => [new Date(e.t).toLocaleTimeString('en-GB'), e.kind, e.text])) : 'nothing yet');
+  }
+  if (sub === 'revisions') {
+    if (!a) throw fail('usage: chron revisions path', 2);
+    const revs = await Mirage.chronicle.revisions(c.path(a));
+    return c.out(revs.length ? table(revs.map(r => [r.t, new Date(r.t).toLocaleString('en-GB'), r.size + ' chars'])) : 'no saved versions');
+  }
+  if (sub === 'restore') {
+    if (!a || !b) throw fail('usage: chron restore path time   (time = the number from revisions)', 2);
+    await Mirage.chronicle.restore(c.path(a), +b); return c.out('restored');
+  }
+  throw fail('usage: chron log [n] | revisions path | restore path time', 2);
+});
+
+/* ── apps ── */
+async function findApp(name) {
+  const n = String(name).toLowerCase();
+  const list = await Mirage.cell.catalog();
+  return list.find(a => a.id.toLowerCase() === n) || list.find(a => a.name.toLowerCase() === n) || null;
+}
+async function launchApp(app, args, c) {
+  const a = {};
+  if (args[0]) {
+    const p = c.path(args[0]), st = await F.stat(p);
+    if (st && st.type === 'dir') a.startPath = p; else a.filePath = p;
+  }
+  await Mirage.cell.open(app.id, { args: a, detached: true });
+}
+def('apps', 'apps', 'apps', 'installed apps', async c => {
+  c.out(table((await Mirage.cell.catalog()).sort((a, b) => a.name.localeCompare(b.name)).map(a => [a.id, a.name, a.category + (a.userApp ? ' · yours' : '')])));
+});
+def('launch', 'apps', 'launch app [path]', 'open an app (by id or name), optionally on a file or folder', async (c, [name, ...rest]) => {
+  if (!name) throw fail('usage: launch app [path]', 2);
+  const app = await findApp(name);
+  if (!app) throw fail(`${name}: no such app (apps lists them)`);
+  await launchApp(app, rest, c);
+}, ['start', 'run']);
+def('open', 'apps', 'open path', 'open a file with its app, or a folder in Files', async (c, [t]) => {
+  if (!t) throw fail('usage: open path', 2);
+  const p = c.path(t);
+  if (!(await F.stat(p))) { const app = await findApp(t); if (app) return launchApp(app, [], c); throw fail(`${t}: no such file or folder`); }
+  const r = await Mirage.fs.open(p);
+  if (r && r.ok === false) throw fail('no app for that file type');
+});
+def('edit', 'apps', 'edit file', 'edit a text file in Notes', async (c, [t]) => {
+  if (!t) throw fail('usage: edit file', 2);
+  const app = await findApp('text-editor');
+  if (!app) throw fail('Notes is not installed');
+  await Mirage.cell.open(app.id, { args: { filePath: c.path(t) }, detached: true });
+}, ['notes']);
+def('files', 'apps', 'files [folder]', 'open Files here (or on a folder)', async (c, [t]) => {
+  await Mirage.cell.open('files', { args: { startPath: c.path(t || '.') }, detached: true });
+});
+def('windows', 'apps', 'windows', 'open cells (focus <id> brings one forward)', async c => {
+  const list = await Mirage.cell.list();
+  c.out(table([['ID', 'APP', 'STATE', 'TITLE'], ...list.map(w => [w.id, w.appId, w.state, w.title])]));
+}, ['cells']);
+def('focus', 'apps', 'focus id', 'bring a cell forward', async (c, [id]) => {
+  if (!id) throw fail('usage: focus id', 2);
+  if (!(await Mirage.cell.focus(id))) throw fail(`${id}: no such cell`);
+});
+def('install', 'apps', 'install file.html', 'register an .html with a manifest as an app', async (c, [t]) => {
+  if (!t) throw fail('usage: install file.html', 2);
+  const r = await Mirage.cell.install(c.path(t)); c.out(`installed ${r.name} (${r.id})`);
+});
+def('pin', 'apps', 'pin path', 'put a file on the Table as a scrap', async (c, [t]) => {
+  if (!t) throw fail('usage: pin path', 2);
+  await Mirage.scraps.pin(c.path(t)); c.out('pinned');
+});
+
+/* ═══ line editor: submit, history, completion ═════════════════════════ */
+const inp = $('in');
+const hist = { i: -1, draft: '' };
+let lastTab = null;
+
+function remember(line) {
+  if (line.startsWith(' ') || sh.history[sh.history.length - 1] === line) return;   // a leading space keeps it private
+  sh.history.push(line);
+  if (sh.history.length > 500) sh.history.shift();
+  saveSoon('history', () => sh.history);
+}
+async function runLine(line) {
+  job = { aborted: false };
+  const io = {
+    job, tty: true,
+    out: (t, cls) => ui.put(t, cls), err: t => ui.put(t, 'err'), html: n => ui.html(n),
+  };
+  syncRow();
+  try { sh.status = await execLine(line, io); }
+  catch (e) { if (e instanceof Abort) { ui.cur = null; ui.put('^C\n', 'dim'); sh.status = 130; } else { ui.put(String(e.message || e) + '\n', 'err'); sh.status = 1; } }
+  finally { ui.cur = null; job = null; asking = null; syncRow(); ui.bottom(); }
+}
+async function submit() {
+  const line = inp.value;
+  inp.value = ''; hist.i = -1; lastTab = null;
+  if (asking) {
+    const a = asking; asking = null;
+    ui.put(a.q + ' ' + line + '\n', 'cmd');
+    syncRow(); a.res(line); return;
+  }
+  ui.echo(line);
+  if (!line.trim()) return;
+  remember(line);
+  await runLine(line);
+}
+function cancel() {
+  if (job) { job.aborted = true; if (asking) { const a = asking; asking = null; syncRow(); a.res(null); } }
+  else { ui.echo(inp.value, '^C'); inp.value = ''; hist.i = -1; }
+}
+function hasSelection() {
+  return String(getSelection() || '').length > 0 || inp.selectionEnd > inp.selectionStart;
+}
+
+function wordStart(s) {
+  let start = 0, q = null;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (q) { if (c === q) q = null; continue; }
+    if (c === '\\') { i++; continue; }
+    if (c === "'" || c === '"') { q = c; continue; }
+    if (c === ' ' || c === '\t' || '|;&<>'.includes(c)) start = i + 1;
+  }
+  return start;
+}
+async function complete() {
+  const pos = inp.selectionStart, before = inp.value.slice(0, pos), after = inp.value.slice(pos);
+  const start = wordStart(before), word = before.slice(start), head = before.slice(0, start);
+  if (/["']/.test(word)) return;
+  const raw = word.replace(/\\(.)/g, '$1');
+  const slash = raw.lastIndexOf('/'), dirRaw = raw.slice(0, slash + 1), base = raw.slice(slash + 1);
+  const typedDir = word.slice(0, word.lastIndexOf('/') + 1);
+  const firstWords = head.trim().split(/\s+/).filter(Boolean), first = firstWords[0];
+  const cmdPos = /(^|[|;&]\s*)$/.test(head);
+  let cands = [];
+  if (slash < 0 && (cmdPos || (['help', 'which', 'type'].includes(first) && firstWords.length === 1))) {
+    const names = new Set([...COMMANDS.keys(), ...ALIASES.keys(), ...Object.keys(sh.aliases)]);
+    cands = [...names].filter(n => n.startsWith(raw)).sort().map(v => ({ v, tail: ' ' }));
+  } else if (slash < 0 && ['launch', 'start', 'run'].includes(first) && firstWords.length === 1) {
+    try { cands = (await Mirage.cell.catalog()).map(a => a.id).filter(n => n.startsWith(raw)).sort().map(v => ({ v, tail: ' ' })); } catch { }
+  } else {
+    try {
+      cands = (await F.list(resolvePath(dirRaw || '.')))
+        .filter(i => i.name.startsWith(base) && (base.startsWith('.') || !i.name.startsWith('.')))
+        .map(i => ({ v: i.name + (i.type === 'dir' ? '/' : ''), tail: i.type === 'dir' ? '' : ' ' }));
+    } catch { }
+  }
+  if (!cands.length) return;
+  const esc = s => s.replace(/([ \t'"\\|;&<>()$*?#])/g, '\\$1');
+  const names = cands.map(c => c.v);
+  const lcp = names.reduce((a, b) => { let i = 0; while (i < a.length && a[i] === b[i]) i++; return a.slice(0, i); });
+  let put = null;
+  if (cands.length === 1) put = typedDir + esc(cands[0].v) + cands[0].tail;
+  else if (lcp.length > base.length) put = typedDir + esc(lcp);
+  if (put !== null) {
+    inp.value = head + put + after;
+    inp.setSelectionRange((head + put).length, (head + put).length);
+    lastTab = null; return;
+  }
+  if (lastTab === inp.value) {
+    ui.echo(inp.value);
+    const box = document.createElement('div'); box.className = 'ents';
+    names.forEach(n => { const s = document.createElement('span'); s.className = 'ent' + (n.endsWith('/') ? ' d' : ''); s.textContent = n; box.appendChild(s); });
+    ui.html(box); lastTab = null;
+  } else lastTab = inp.value;
+}
+
+inp.addEventListener('input', () => { hist.i = -1; lastTab = null; });
+inp.addEventListener('keydown', e => {
+  const k = e.key, ctrl = e.ctrlKey && !e.altKey && !e.metaKey;
+  if (k === 'Enter') { e.preventDefault(); submit(); return; }
+  if (asking) return;
+  if (k === 'Tab') { e.preventDefault(); complete(); return; }
+  if (k === 'ArrowUp' || k === 'ArrowDown') {
+    e.preventDefault();
+    if (k === 'ArrowUp') {
+      if (hist.i === -1) hist.draft = inp.value;
+      if (hist.i < sh.history.length - 1) hist.i++;
+    } else if (hist.i > -1) hist.i--;
+    inp.value = hist.i === -1 ? hist.draft : sh.history[sh.history.length - 1 - hist.i];
+    inp.setSelectionRange(inp.value.length, inp.value.length);
+    return;
+  }
+  if (k === 'Escape') { inp.value = ''; hist.i = -1; return; }
+  if (ctrl && k === 'u') { e.preventDefault(); inp.value = inp.value.slice(inp.selectionStart); inp.setSelectionRange(0, 0); return; }
+  if (ctrl && k === 'k') { e.preventDefault(); inp.value = inp.value.slice(0, inp.selectionStart); return; }
+  if (ctrl && k === 'w') {
+    e.preventDefault();
+    const p = inp.selectionStart, left = inp.value.slice(0, p).replace(/\S+\s*$/, '');
+    inp.value = left + inp.value.slice(p); inp.setSelectionRange(left.length, left.length); return;
+  }
+  if (ctrl && k === 'd' && !inp.value) { e.preventDefault(); Mirage.cell.close(); }
+});
+document.addEventListener('keydown', e => {
+  const ctrl = e.ctrlKey && !e.altKey && !e.metaKey, k = e.key.toLowerCase();
+  if (ctrl && k === 'c') { if (hasSelection() && !job) return; e.preventDefault(); cancel(); return; }
+  if (ctrl && k === 'l') { e.preventDefault(); ui.clear(); return; }
+  if (e.key === 'PageUp' || e.key === 'PageDown') { e.preventDefault(); $('scroll').scrollBy(0, (e.key === 'PageUp' ? -1 : 1) * $('scroll').clientHeight * 0.85); return; }
+  if (document.activeElement !== inp && !$('row').hidden && e.key.length === 1 && !ctrl && !e.altKey && !e.metaKey) inp.focus();
+});
+$('scroll').addEventListener('mouseup', () => { if (!hasSelection() && !$('row').hidden) inp.focus(); });
+$('clr').onclick = () => { ui.clear(); syncRow(); };
+window.addEventListener('focus', () => { if (!$('row').hidden) inp.focus(); });
+
+/* a name from ls: double-click opens it, a folder gets entered */
+$('out').addEventListener('dblclick', async e => {
+  const ent = e.target.closest('.ent[data-path]');
+  if (!ent || job) return;
+  const p = ent.dataset.path;
+  if (ent.dataset.type === 'dir') { inp.value = ''; ui.echo('cd ' + relTo(p)); setCwd(p); await runLine('ls'); }
+  else Mirage.fs.open(p).then(r => { if (r && r.ok === false) ui.put('no app for that file type\n', 'err'); }).catch(err => ui.put(err.message + '\n', 'err'));
+});
+const esc1 = s => s.replace(/([ \t'"\\|;&<>()$*?#])/g, '\\$1');
+Mirage.contextMenu(ev => {
+  const ent = ev.target.closest && ev.target.closest('.ent[data-path]');
+  if (ent) {
+    const p = ent.dataset.path;
+    return [
+      { label: ent.dataset.type === 'dir' ? 'Open folder' : 'Open', hint: 'dbl click', run: () => Mirage.fs.open(p).catch(() => { }) },
+      { label: 'Put path in the prompt', run: () => { inp.value += (inp.value && !inp.value.endsWith(' ') ? ' ' : '') + esc1(relTo(p)); inp.focus(); } },
+      { label: 'Pin to the table', run: () => Mirage.scraps.pin(p).catch(() => { }) },
+    ];
+  }
+  return [
+    { label: 'Clear', hint: 'Ctrl+L', run: () => ui.clear() },
+    { label: 'Open this folder in Files', run: () => Mirage.cell.open('files', { args: { startPath: sh.cwd }, detached: true }).catch(() => { }) },
+    { sep: true },
+    { label: 'Forget history', danger: true, items: [{ label: 'Yes, forget it', danger: true, run: () => { sh.history = []; save('history', []); } }] },
+  ];
+});
+
+/* ═══ start ═════════════════════════════════════════════════════════════ */
+Mirage.ready.then(async info => {
+  const [hist_, ali, env, cwd, sys] = await Promise.all([
+    Mirage.store.get('history', []), Mirage.store.get('aliases', null), Mirage.store.get('env', {}),
+    Mirage.store.get('cwd', HOME), Mirage.sys.info().catch(() => null),
+  ]);
+  if (Array.isArray(hist_)) sh.history = hist_.filter(x => typeof x === 'string').slice(-500);
+  sh.aliases = ali && typeof ali === 'object' ? ali : { ...DEFAULT_ALIASES };
+  if (!ali) save('aliases', sh.aliases);
+  if (env && typeof env === 'object') sh.env = env;
+  const u = sys && sys.user;
+  const nm = typeof u === 'string' ? u : u && (u.name || u.username || u.id);
+  if (nm) sh.user = String(nm).toLowerCase().replace(/\s+/g, '_').slice(0, 20);
+
+  let start = info.args && info.args.startPath && info.args.startPath.startsWith(HOME) ? info.args.startPath : cwd;
+  try { start = resolvePath(start); } catch { start = HOME; }
+  const st = await F.stat(start);
+  setCwd(st && st.type === 'dir' ? start : HOME);
+  sh.prev = sh.cwd;
+
+  ui.put('Mirage terminal' + (sys ? `  ·  kernel ${sys.kernel}  ·  mirage ${sys.mirage}` : '') + '\n', 'head');
+  ui.put('help lists the commands · Tab completes · Ctrl+C cancels · double-click a name to open it\n', 'dim');
+  ui.put('\n');
+  syncRow();
+});
+Mirage.on('args', a => { if (a && a.startPath) { try { F.stat(resolvePath(a.startPath)).then(s => { if (s && s.type === 'dir') setCwd(resolvePath(a.startPath)); }); } catch { } } });
+</script></body></html>

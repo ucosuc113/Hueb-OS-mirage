@@ -13,9 +13,13 @@
   /* spine with tabs */
   .spine{width:176px;flex:none;display:flex;flex-direction:column;padding:16px 0;border-right:var(--bw) dashed var(--edge)}
   .spine h1{padding:0 16px 14px;font:600 12px/1 var(--mono);letter-spacing:.32em;text-transform:uppercase}
-  .tab{display:flex;gap:10px;align-items:baseline;width:100%;padding:10px 16px;border:0;border-left:calc(var(--bw) * 2) solid transparent;
+  .tab{display:flex;gap:10px;align-items:center;width:100%;padding:10px 16px;border:0;border-left:calc(var(--bw) * 2) solid transparent;
     text-align:left;font:12px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--ink2)}
-  .tab b{font-weight:400;opacity:.6}
+  /* marker: a dash; the selected tab shrinks it into a dot, the one before grows back into a dash */
+  .dash{display:flex;align-items:center;justify-content:center;flex:none;width:18px;height:calc(var(--bw) * 3)}
+  .dash i{display:block;width:100%;height:var(--bw);background:currentColor;opacity:.6;
+    transition:width .28s cubic-bezier(.65,0,.35,1),height .28s cubic-bezier(.65,0,.35,1),opacity .28s}
+  .tab.on .dash i{width:calc(var(--bw) * 3);height:calc(var(--bw) * 3);opacity:1}
   .tab:hover:not(:disabled){color:var(--ink);border-left-color:var(--edge)}
   .tab.on{background:transparent;color:var(--ink);border-left-color:var(--ink)}
   .sp{flex:1}
@@ -96,7 +100,9 @@
   let cur = 'profile', seq = 0;
   async function show() {
     const my = ++seq;
-    $('tabs').innerHTML = TABS.map(([id, n], i) => `<button class="tab${id === cur ? ' on' : ''}" data-tab="${id}"><b>${String(i + 1).padStart(2, '0')}</b>${n}</button>`).join('');
+    /* built once and only toggled afterwards, so the dash ↔ dot transition can play */
+    if (!$('tabs').children.length) $('tabs').innerHTML = TABS.map(([id, n]) => `<button class="tab" data-tab="${id}"><span class="dash"><i></i></span>${n}</button>`).join('');
+    $('tabs').querySelectorAll('.tab').forEach(b => b.classList.toggle('on', b.dataset.tab === cur));
     const html = await PAGES[cur]();
     if (my !== seq) return;
     $('page').innerHTML = html; $('page').scrollTop = 0;

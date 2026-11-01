@@ -2,7 +2,9 @@ Mirage (or Hueb-OS Mirage) belongs to the 'Hueb-OS' series of web operating syst
 
 Mirage is an experimental edition of the series, designed to explore entirely original and new features for a web operating system.
 
-How do I access Mirage? [Click here](https://ucosuc113.github.io/Hueb-OS-mirage/)
+How to play: [Click here](https://ucosuc113.github.io/Hueb-OS-mirage/)
+
+Once you log in, wait for the necessary system packages to be installed, and then you can start using it :3
 
 What does the system include?:
 
